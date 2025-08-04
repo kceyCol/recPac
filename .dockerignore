@@ -19,3 +19,6 @@ dist/
 .tox/
 README.md
 .gitignore
+# Excluir arquivos antigos do Flask
+static/
+templates/
