@@ -1,16 +1,14 @@
-# Use uma imagem base do Node.js para build do frontend
+# Estágio 1: Build do frontend
 FROM node:18-slim as frontend-build
 
-# Instalar dependências do frontend
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm ci --only=production
 
-# Copiar código do frontend e fazer build
 COPY frontend/ ./
 RUN npm run build
 
-# Usar imagem Python para o backend
+# Estágio 2: Aplicação Python
 FROM python:3.12-slim
 
 # Instala FFmpeg e outras dependências do sistema

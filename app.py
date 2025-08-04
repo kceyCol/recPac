@@ -438,6 +438,25 @@ def create_docx_from_text(text, title="Resumo da Consulta"):
         return None
 
 
+# Rota principal - servir o frontend React ou página inicial
+@app.route('/')
+def index():
+    # Se existe o build do React, servir o index.html
+    if os.path.exists('frontend/build/index.html'):
+        return send_from_directory('frontend/build', 'index.html')
+    else:
+        # Caso contrário, servir o template Flask tradicional
+        return render_template('index.html')
+
+# Servir arquivos estáticos do React
+@app.route('/static/<path:filename>')
+def serve_react_static(filename):
+    if os.path.exists('frontend/build/static'):
+        return send_from_directory('frontend/build/static', filename)
+    else:
+        # Fallback para arquivos estáticos tradicionais
+        return send_from_directory('static', filename)
+
 # Rotas principais (mantidas para compatibilidade)
 @app.route('/app')
 @login_required
@@ -1097,6 +1116,23 @@ def get_default_prompt():
         return jsonify({'prompt': default_prompt})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# Rota catch-all para o React Router (SPA)
+@app.route('/<path:path>')
+def serve_react_app(path):
+    # Se for uma rota da API, não interceptar
+    if path.startswith(('api/', 'auth/', 'audio/', 'static/', 'app', 'transcribe', 'download', 'rename_recording', 'transcriptions', 'recordings', 'delete_recording', 'finalize_session', 'view_transcription', 'export_summary_pdf', 'export_summary_docx')):
+        return jsonify({'error': 'Route not found'}), 404
+    
+    # Verificar se o arquivo existe no build do React
+    if os.path.exists('frontend/build') and os.path.exists(os.path.join('frontend/build', path)):
+        return send_from_directory('frontend/build', path)
+    elif os.path.exists('frontend/build/index.html'):
+        # Servir o index.html para roteamento do React
+        return send_from_directory('frontend/build', 'index.html')
+    else:
+        # Fallback para templates Flask
+        return render_template('index.html')
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
