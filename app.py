@@ -437,7 +437,6 @@ def create_docx_from_text(text, title="Resumo da Consulta"):
         print(f"Erro ao criar DOCX: {e}")
         return None
 
-
 # Rota principal - servir o frontend React ou página inicial
 @app.route('/')
 def index():
@@ -449,7 +448,8 @@ def index():
         # Se não existir, retornar erro explicativo
         return jsonify({
             'error': 'Frontend build not found',
-            'message': 'React build directory does not exist. Please check if the build process completed successfully.'
+            'message': 'React build directory does not exist. Please check if the build process completed successfully.',
+            'debug_info': f'Looking for: {os.path.abspath(react_index)}'
         }), 500
 
 # Servir arquivos estáticos do React
@@ -459,7 +459,7 @@ def serve_react_static(filename):
     if os.path.exists(react_static):
         return send_from_directory(react_static, filename)
     else:
-        return jsonify({'error': 'Static file not found'}), 404
+        return jsonify({'error': 'Static file not found', 'file': filename}), 404
 
 # Rotas principais (mantidas para compatibilidade)
 @app.route('/app')
@@ -1141,9 +1141,10 @@ def serve_react_app(path):
         # Se não existir o build do React, retornar erro
         return jsonify({
             'error': 'Frontend not available',
-            'message': 'React build not found. Please check the deployment.'
+            'message': 'React build not found. Please check the deployment.',
+            'requested_path': path
         }), 500
-
+        
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug_mode = os.environ.get('FLASK_ENV') == 'development'
