@@ -3,17 +3,29 @@ FROM node:18-slim as frontend-build
 
 WORKDIR /app/frontend
 
+# Debug: Verificar versão do Node
+RUN node --version && npm --version
+
 # Copiar package.json e package-lock.json
 COPY frontend/package*.json ./
 
+# Debug: Mostrar conteúdo do package.json
+RUN cat package.json
+
 # Instalar dependências (incluindo devDependencies para o build)
-RUN npm ci
+RUN npm ci --verbose
 
 # Copiar todo o código do frontend
 COPY frontend/ ./
 
+# Debug: Listar arquivos copiados
+RUN ls -la
+
 # Fazer build do React com Tailwind CSS
-RUN npm run build
+RUN npm run build --verbose
+
+# Debug: Verificar se o build foi criado
+RUN ls -la build/ || echo "Build directory not created!"
 
 # Estágio 2: Aplicação Python
 FROM python:3.12-slim
@@ -40,6 +52,11 @@ COPY . .
 
 # Copiar build do frontend do estágio anterior
 COPY --from=frontend-build /app/frontend/build ./frontend/build
+
+# Debug: Verificar se o build foi copiado
+RUN ls -la frontend/ || echo "Frontend directory not found!"
+RUN ls -la frontend/build/ || echo "Frontend build directory not found!"
+RUN ls -la frontend/build/index.html || echo "Frontend index.html not found!"
 
 # Expor porta
 EXPOSE 10000
