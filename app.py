@@ -437,25 +437,6 @@ def create_docx_from_text(text, title="Resumo da Consulta"):
         print(f"Erro ao criar DOCX: {e}")
         return None
 
-# Servir arquivos estáticos do React
-@app.route('/static/<path:filename>')
-def serve_react_static(filename):
-    return send_from_directory('frontend/build/static', filename)
-
-# Servir o frontend React para todas as rotas não-API
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def serve_react_app(path):
-    # Se for uma rota da API, não interceptar
-    if path.startswith('api/') or path.startswith('auth/') or path.startswith('audio/'):
-        return jsonify({'error': 'Route not found'}), 404
-    
-    # Verificar se o arquivo existe no build do React
-    if path != "" and os.path.exists(os.path.join('frontend/build', path)):
-        return send_from_directory('frontend/build', path)
-    else:
-        # Servir o index.html para roteamento do React
-        return send_from_directory('frontend/build', 'index.html')
 
 # Rotas principais (mantidas para compatibilidade)
 @app.route('/app')
