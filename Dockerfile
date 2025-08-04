@@ -1,4 +1,4 @@
-FROM node:20-bullseye-slim
+FROM node:18
 
 # Instalar Python
 RUN apt-get update && apt-get install -y python3 python3-pip portaudio19-dev libportaudio2 gcc ffmpeg
