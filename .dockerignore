@@ -1,6 +1,5 @@
 # Excluir apenas o que não é necessário para o build
 frontend/node_modules/
-frontend/build/
 node_modules/
 .git/
 .env
