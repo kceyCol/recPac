@@ -1,0 +1,22 @@
+# Excluir apenas o que não é necessário para o build
+frontend/node_modules/
+frontend/build/
+node_modules/
+.git/
+.env
+recordings/
+transcriptions/
+users.json
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+dist/
+*.egg-info/
+.coverage
+.cache
+.tox/
+README.md
+.gitignore
