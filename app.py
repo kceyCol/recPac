@@ -446,20 +446,6 @@ def serve_react_static(filepath):
     else:
         return jsonify({'error': 'Static file not found', 'file': filepath}), 404
 
-# Servir outros assets do React (favicon, manifest, etc.)
-@app.route('/<path:filename>')
-def serve_react_assets(filename):
-    # Lista de arquivos que devem ser servidos da pasta build
-    react_assets = ['favicon.ico', 'manifest.json', 'robots.txt', 'logo192.png', 'logo512.png']
-    
-    if filename in react_assets:
-        react_build = 'frontend/build'
-        if os.path.exists(os.path.join(react_build, filename)):
-            return send_from_directory(react_build, filename)
-    
-    # Se não for um asset, continuar para o React Router
-    return serve_react_app(filename)
-
 # Rotas principais (mantidas para compatibilidade)
 @app.route('/app')
 @login_required
@@ -1120,13 +1106,20 @@ def get_default_prompt():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# Rota principal - servir o frontend React ou página inicial
+# Rota catch-all para o React Router
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve_react_app(path):
     # Se for uma rota da API, não interceptar
     if path.startswith(('api/', 'auth/', 'audio/', 'app', 'transcribe', 'download', 'rename_recording', 'transcriptions', 'recordings', 'delete_recording', 'finalize_session', 'view_transcription', 'export_summary_pdf', 'export_summary_docx', 'static/')):
         return jsonify({'error': 'Route not found'}), 404
+    
+    # Verificar se é um asset específico do React
+    react_assets = ['favicon.ico', 'manifest.json', 'robots.txt', 'logo192.png', 'logo512.png']
+    if path in react_assets:
+        react_build = 'frontend/build'
+        if os.path.exists(os.path.join(react_build, path)):
+            return send_from_directory(react_build, path)
     
     # Verificar se o arquivo existe no build do React
     react_build_dir = 'frontend/build'
