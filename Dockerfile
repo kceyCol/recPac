@@ -1,4 +1,16 @@
-# Use uma imagem base do Python
+# Use uma imagem base do Node.js para build do frontend
+FROM node:18-slim as frontend-build
+
+# Instalar dependências do frontend
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm ci --only=production
+
+# Copiar código do frontend e fazer build
+COPY frontend/ ./
+RUN npm run build
+
+# Usar imagem Python para o backend
 FROM python:3.12-slim
 
 # Instala FFmpeg e outras dependências do sistema
@@ -20,6 +32,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copia todo o código da aplicação
 COPY . .
+
+# Copia o build do frontend da etapa anterior
+COPY --from=frontend-build /app/frontend/build ./frontend/build
 
 # Comando para iniciar a aplicação
 CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:10000"]
