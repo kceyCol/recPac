@@ -1125,7 +1125,7 @@ def get_default_prompt():
 @app.route('/<path:path>')
 def serve_react_app(path):
     # Se for uma rota da API, não interceptar
-    if path.startswith(('api/', 'auth/', 'audio/', 'static/', 'app', 'transcribe', 'download', 'rename_recording', 'transcriptions', 'recordings', 'delete_recording', 'finalize_session', 'view_transcription', 'export_summary_pdf', 'export_summary_docx')):
+    if path.startswith(('api/', 'auth/', 'audio/', 'app', 'transcribe', 'download', 'rename_recording', 'transcriptions', 'recordings', 'delete_recording', 'finalize_session', 'view_transcription', 'export_summary_pdf', 'export_summary_docx')):
         return jsonify({'error': 'Route not found'}), 404
     
     # Verificar se o arquivo existe no build do React
