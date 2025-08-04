@@ -34,7 +34,7 @@ from utils import configure_gemini, create_directories, RECORDINGS_DIR, TRANSCRI
 # Carregar variáveis de ambiente
 load_dotenv()
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder=None, static_url_path=None)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'sua_chave_secreta_aqui_mude_em_producao')
 
 # Configurações de sessão
@@ -437,21 +437,6 @@ def create_docx_from_text(text, title="Resumo da Consulta"):
         print(f"Erro ao criar DOCX: {e}")
         return None
 
-# Rota principal - servir o frontend React ou página inicial
-@app.route('/')
-def index():
-    # Sempre tentar servir o React build
-    react_index = os.path.join('frontend', 'build', 'index.html')
-    if os.path.exists(react_index):
-        return send_from_directory('frontend/build', 'index.html')
-    else:
-        # Se não existir, retornar erro explicativo
-        return jsonify({
-            'error': 'Frontend build not found',
-            'message': 'React build directory does not exist. Please check if the build process completed successfully.',
-            'debug_info': f'Looking for: {os.path.abspath(react_index)}'
-        }), 500
-
 # Servir arquivos estáticos do React
 @app.route('/static/<path:filepath>')
 def serve_react_static(filepath):
@@ -460,6 +445,20 @@ def serve_react_static(filepath):
         return send_from_directory(react_static, filepath)
     else:
         return jsonify({'error': 'Static file not found', 'file': filepath}), 404
+
+# Servir outros assets do React (favicon, manifest, etc.)
+@app.route('/<path:filename>')
+def serve_react_assets(filename):
+    # Lista de arquivos que devem ser servidos da pasta build
+    react_assets = ['favicon.ico', 'manifest.json', 'robots.txt', 'logo192.png', 'logo512.png']
+    
+    if filename in react_assets:
+        react_build = 'frontend/build'
+        if os.path.exists(os.path.join(react_build, filename)):
+            return send_from_directory(react_build, filename)
+    
+    # Se não for um asset, continuar para o React Router
+    return serve_react_app(filename)
 
 # Rotas principais (mantidas para compatibilidade)
 @app.route('/app')
@@ -1121,11 +1120,12 @@ def get_default_prompt():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# Rota catch-all para o React Router (SPA)
+# Rota principal - servir o frontend React ou página inicial
+@app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve_react_app(path):
     # Se for uma rota da API, não interceptar
-    if path.startswith(('api/', 'auth/', 'audio/', 'app', 'transcribe', 'download', 'rename_recording', 'transcriptions', 'recordings', 'delete_recording', 'finalize_session', 'view_transcription', 'export_summary_pdf', 'export_summary_docx')):
+    if path.startswith(('api/', 'auth/', 'audio/', 'app', 'transcribe', 'download', 'rename_recording', 'transcriptions', 'recordings', 'delete_recording', 'finalize_session', 'view_transcription', 'export_summary_pdf', 'export_summary_docx', 'static/')):
         return jsonify({'error': 'Route not found'}), 404
     
     # Verificar se o arquivo existe no build do React
