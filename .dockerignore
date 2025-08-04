@@ -11,7 +11,7 @@ __pycache__/
 *.pyo
 *.pyd
 .Python
-build/
+# Excluir apenas builds Python, não o build do React
 dist/
 *.egg-info/
 .coverage
