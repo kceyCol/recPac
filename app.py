@@ -453,13 +453,13 @@ def index():
         }), 500
 
 # Servir arquivos estáticos do React
-@app.route('/static/<path:filename>')
-def serve_react_static(filename):
+@app.route('/static/<path:filepath>')
+def serve_react_static(filepath):
     react_static = os.path.join('frontend', 'build', 'static')
     if os.path.exists(react_static):
-        return send_from_directory(react_static, filename)
+        return send_from_directory(react_static, filepath)
     else:
-        return jsonify({'error': 'Static file not found', 'file': filename}), 404
+        return jsonify({'error': 'Static file not found', 'file': filepath}), 404
 
 # Rotas principais (mantidas para compatibilidade)
 @app.route('/app')
