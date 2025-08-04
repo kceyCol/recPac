@@ -34,7 +34,7 @@ from utils import configure_gemini, create_directories, RECORDINGS_DIR, TRANSCRI
 # Carregar variáveis de ambiente
 load_dotenv()
 
-app = Flask(__name__, static_folder='static', template_folder='templates')
+app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'sua_chave_secreta_aqui_mude_em_producao')
 
 # Configurações de sessão
@@ -441,21 +441,25 @@ def create_docx_from_text(text, title="Resumo da Consulta"):
 # Rota principal - servir o frontend React ou página inicial
 @app.route('/')
 def index():
-    # Se existe o build do React, servir o index.html
-    if os.path.exists('frontend/build/index.html'):
+    # Sempre tentar servir o React build
+    react_index = os.path.join('frontend', 'build', 'index.html')
+    if os.path.exists(react_index):
         return send_from_directory('frontend/build', 'index.html')
     else:
-        # Caso contrário, servir o template Flask tradicional
-        return render_template('index.html')
+        # Se não existir, retornar erro explicativo
+        return jsonify({
+            'error': 'Frontend build not found',
+            'message': 'React build directory does not exist. Please check if the build process completed successfully.'
+        }), 500
 
 # Servir arquivos estáticos do React
 @app.route('/static/<path:filename>')
 def serve_react_static(filename):
-    if os.path.exists('frontend/build/static'):
-        return send_from_directory('frontend/build/static', filename)
+    react_static = os.path.join('frontend', 'build', 'static')
+    if os.path.exists(react_static):
+        return send_from_directory(react_static, filename)
     else:
-        # Fallback para arquivos estáticos tradicionais
-        return send_from_directory('static', filename)
+        return jsonify({'error': 'Static file not found'}), 404
 
 # Rotas principais (mantidas para compatibilidade)
 @app.route('/app')
@@ -1125,14 +1129,20 @@ def serve_react_app(path):
         return jsonify({'error': 'Route not found'}), 404
     
     # Verificar se o arquivo existe no build do React
-    if os.path.exists('frontend/build') and os.path.exists(os.path.join('frontend/build', path)):
-        return send_from_directory('frontend/build', path)
-    elif os.path.exists('frontend/build/index.html'):
+    react_build_dir = 'frontend/build'
+    file_path = os.path.join(react_build_dir, path)
+    
+    if os.path.exists(react_build_dir) and os.path.exists(file_path):
+        return send_from_directory(react_build_dir, path)
+    elif os.path.exists(os.path.join(react_build_dir, 'index.html')):
         # Servir o index.html para roteamento do React
-        return send_from_directory('frontend/build', 'index.html')
+        return send_from_directory(react_build_dir, 'index.html')
     else:
-        # Fallback para templates Flask
-        return render_template('index.html')
+        # Se não existir o build do React, retornar erro
+        return jsonify({
+            'error': 'Frontend not available',
+            'message': 'React build not found. Please check the deployment.'
+        }), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
