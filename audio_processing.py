@@ -346,15 +346,15 @@ def api_save_recording():
         
         audio_bytes = base64.b64decode(audio_data)
         
-        # Gerar nome do arquivo
-        user_email = session.get('user_email', 'unknown')
+        # Gerar nome do arquivo usando user_id da sessão
+        user_id = session.get('user_id', 'unknown')
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
         if patient_name:
             safe_patient_name = sanitize_filename(patient_name)
-            filename = f"{safe_patient_name}_{timestamp}_{user_email.split('@')[0]}.wav"
+            filename = f"{safe_patient_name}_{timestamp}_{user_id}.wav"
         else:
-            filename = f"recording_{timestamp}_{user_email.split('@')[0]}.wav"
+            filename = f"recording_{timestamp}_{user_id}.wav"
         
         # Salvar arquivo
         file_path = os.path.join(RECORDINGS_DIR, filename)
