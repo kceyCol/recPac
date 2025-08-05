@@ -1105,7 +1105,6 @@ def get_default_prompt():
         return jsonify({'prompt': default_prompt})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
 # ÚNICA rota catch-all para o React Router
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
@@ -1114,11 +1113,30 @@ def serve_react_app(path):
     print(f"DEBUG: Requisição para path: '{path}'")
     
     # Se for uma rota da API, NÃO interceptar - deixar o Flask processar
-    if path.startswith(('api/', 'auth/', 'audio/', 'app', 'transcribe', 'download', 'rename_recording', 'transcriptions', 'recordings', 'delete_recording', 'finalize_session', 'view_transcription', 'export_summary_pdf', 'export_summary_docx', 'static/')):
+    api_prefixes = [
+        'api/',
+        'auth/', 
+        'audio/',
+        'app',
+        'transcribe',
+        'download',
+        'rename_recording',
+        'transcriptions',
+        'recordings',
+        'delete_recording',
+        'finalize_session',
+        'view_transcription',
+        'export_summary_pdf',
+        'export_summary_docx',
+        'static/',
+        'create-test-user'  # Adicionado para teste
+    ]
+    
+    if any(path.startswith(prefix) for prefix in api_prefixes):
         print(f"DEBUG: Rota de API detectada: {path} - deixando Flask processar")
-        # NÃO retornar erro aqui - deixar o Flask continuar processando
+        # Usar abort(404) para permitir que outras rotas sejam processadas
         from flask import abort
-        abort(404)  # Isso permite que outras rotas sejam testadas
+        abort(404)
     
     react_build_dir = 'frontend/build'
     
