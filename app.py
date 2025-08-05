@@ -1105,40 +1105,25 @@ def get_default_prompt():
         return jsonify({'prompt': default_prompt})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-# Rota específica para a página inicial
+# Rota para a página inicial
 @app.route('/')
-def serve_react_index():
-    react_build_dir = 'frontend/build'
-    index_path = os.path.join(react_build_dir, 'index.html')
-    if os.path.exists(index_path):
-        return send_from_directory(react_build_dir, 'index.html')
-    else:
-        return jsonify({'error': 'Frontend build not found'}), 500
+def index():
+    return send_from_directory('frontend/build', 'index.html')
 
-# Rota para assets específicos do React (favicon, manifest, etc.)
-@app.route('/<path:filename>')
-def serve_react_assets(filename):
-    # IMPORTANTE: NÃO interceptar rotas que começam com 'api'
-    if filename.startswith('api'):
-        # Retornar 404 para permitir que outras rotas sejam testadas
+# Rota para arquivos estáticos do React
+@app.route('/<path:path>')
+def static_files(path):
+    # Se for API, não interceptar
+    if path.startswith('api'):
         from flask import abort
         abort(404)
     
-    react_build_dir = 'frontend/build'
-    
-    # Assets específicos do React
-    react_assets = ['favicon.ico', 'manifest.json', 'robots.txt', 'logo192.png', 'logo512.png']
-    if filename in react_assets:
-        asset_path = os.path.join(react_build_dir, filename)
-        if os.path.exists(asset_path):
-            return send_from_directory(react_build_dir, filename)
-    
-    # Para qualquer outra rota que não seja API, servir index.html (SPA routing)
-    index_path = os.path.join(react_build_dir, 'index.html')
-    if os.path.exists(index_path):
-        return send_from_directory(react_build_dir, 'index.html')
-    else:
-        return jsonify({'error': 'Frontend build not found'}), 500
+    # Tentar servir o arquivo
+    try:
+        return send_from_directory('frontend/build', path)
+    except:
+        # Se não encontrar, servir index.html para SPA routing
+        return send_from_directory('frontend/build', 'index.html')
         
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
