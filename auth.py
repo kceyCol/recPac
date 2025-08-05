@@ -1,27 +1,104 @@
 from flask import Blueprint, request, jsonify, session
 import hashlib
-import json
+import sqlite3
 import os
 from datetime import datetime
 from functools import wraps
+import logging
 
 auth_bp = Blueprint('auth', __name__)
-USERS_FILE = 'users.json'
+USERS_DB = 'users.db'
+
+# Configurar logging
+logger = logging.getLogger(__name__)
+
+def init_database():
+    """Inicializa o banco de dados SQLite"""
+    conn = sqlite3.connect(USERS_DB)
+    cursor = conn.cursor()
+    
+    # Criar tabela de usuários
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            email TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            password TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            user_id TEXT NOT NULL
+        )
+    ''')
+    
+    # Verificar se há usuários, se não, criar os de teste
+    cursor.execute('SELECT COUNT(*) FROM users')
+    if cursor.fetchone()[0] == 0:
+        logger.info("🔧 [DB] Criando usuários de teste automaticamente...")
+        test_users = [
+            ('alekcey@me.com', 'alekcey colione', '8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92', '2025-07-23T16:02:10.773243', '4cdfe8a1'),
+            ('admin@test.com', 'Administrador', '8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92', '2025-07-31T17:25:55.209682', 'admin123'),
+            ('user@test.com', 'Usuário Teste', '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', '2025-07-31T17:25:55.209682', 'user123'),
+            ('test@test.com', 'Usuário Teste', '8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92', '2025-07-31T17:25:55.209682', 'b642b421')
+        ]
+        
+        cursor.executemany('''
+            INSERT INTO users (email, name, password, created_at, user_id)
+            VALUES (?, ?, ?, ?, ?)
+        ''', test_users)
+        
+        logger.info("✅ [DB] 4 usuários de teste criados automaticamente!")
+    
+    conn.commit()
+    conn.close()
 
 def load_users():
-    """Carrega usuários do arquivo JSON"""
-    if os.path.exists(USERS_FILE):
-        try:
-            with open(USERS_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            return {}
-    return {}
+    """Carrega usuários do banco SQLite"""
+    try:
+        init_database()  # Garante que o DB existe
+        
+        conn = sqlite3.connect(USERS_DB)
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT email, name, password, created_at, user_id FROM users')
+        rows = cursor.fetchall()
+        
+        users = {}
+        for row in rows:
+            email, name, password, created_at, user_id = row
+            users[email] = {
+                'name': name,
+                'password': password,
+                'created_at': created_at,
+                'user_id': user_id
+            }
+        
+        conn.close()
+        logger.info(f"🔍 [DB] Carregados {len(users)} usuários do banco")
+        return users
+    except Exception as e:
+        logger.error(f"❌ [DB] Erro ao carregar usuários: {str(e)}")
+        return {}
 
 def save_users(users):
-    """Salva usuários no arquivo JSON"""
-    with open(USERS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(users, f, indent=2, ensure_ascii=False)
+    """Salva usuários no banco SQLite"""
+    try:
+        init_database()
+        
+        conn = sqlite3.connect(USERS_DB)
+        cursor = conn.cursor()
+        
+        # Limpar tabela e inserir novos dados
+        cursor.execute('DELETE FROM users')
+        
+        for email, data in users.items():
+            cursor.execute('''
+                INSERT INTO users (email, name, password, created_at, user_id)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (email, data['name'], data['password'], data['created_at'], data['user_id']))
+        
+        conn.commit()
+        conn.close()
+        logger.info(f"✅ [DB] Salvos {len(users)} usuários no banco")
+    except Exception as e:
+        logger.error(f"❌ [DB] Erro ao salvar usuários: {str(e)}")
 
 def hash_password(password):
     """Gera hash SHA256 da senha"""
