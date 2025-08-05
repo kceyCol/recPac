@@ -1106,36 +1106,59 @@ def get_default_prompt():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# Rota catch-all para o React Router
+# ÚNICA rota catch-all para o React Router
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve_react_app(path):
+    # Debug: Log da requisição
+    print(f"DEBUG: Requisição para path: '{path}'")
+    
     # Se for uma rota da API, não interceptar
     if path.startswith(('api/', 'auth/', 'audio/', 'app', 'transcribe', 'download', 'rename_recording', 'transcriptions', 'recordings', 'delete_recording', 'finalize_session', 'view_transcription', 'export_summary_pdf', 'export_summary_docx', 'static/')):
+        print(f"DEBUG: Rota de API detectada: {path}")
         return jsonify({'error': 'Route not found'}), 404
+    
+    react_build_dir = 'frontend/build'
+    
+    # Verificar se o diretório build existe
+    if not os.path.exists(react_build_dir):
+        print(f"DEBUG: Diretório build não encontrado: {react_build_dir}")
+        return jsonify({
+            'error': 'Frontend build not found',
+            'message': 'React build directory does not exist. Please check the deployment.',
+            'build_dir': react_build_dir,
+            'current_dir': os.getcwd(),
+            'files_in_current_dir': os.listdir('.') if os.path.exists('.') else []
+        }), 500
     
     # Verificar se é um asset específico do React
     react_assets = ['favicon.ico', 'manifest.json', 'robots.txt', 'logo192.png', 'logo512.png']
     if path in react_assets:
-        react_build = 'frontend/build'
-        if os.path.exists(os.path.join(react_build, path)):
-            return send_from_directory(react_build, path)
+        asset_path = os.path.join(react_build_dir, path)
+        if os.path.exists(asset_path):
+            print(f"DEBUG: Servindo asset: {path}")
+            return send_from_directory(react_build_dir, path)
     
-    # Verificar se o arquivo existe no build do React
-    react_build_dir = 'frontend/build'
-    file_path = os.path.join(react_build_dir, path)
+    # Verificar se o arquivo específico existe no build
+    if path:
+        file_path = os.path.join(react_build_dir, path)
+        if os.path.exists(file_path):
+            print(f"DEBUG: Servindo arquivo específico: {path}")
+            return send_from_directory(react_build_dir, path)
     
-    if os.path.exists(react_build_dir) and os.path.exists(file_path):
-        return send_from_directory(react_build_dir, path)
-    elif os.path.exists(os.path.join(react_build_dir, 'index.html')):
-        # Servir o index.html para roteamento do React
+    # Servir index.html para roteamento do React (SPA)
+    index_path = os.path.join(react_build_dir, 'index.html')
+    if os.path.exists(index_path):
+        print(f"DEBUG: Servindo index.html para path: '{path}'")
         return send_from_directory(react_build_dir, 'index.html')
     else:
-        # Se não existir o build do React, retornar erro
+        print(f"DEBUG: index.html não encontrado em: {index_path}")
         return jsonify({
             'error': 'Frontend not available',
-            'message': 'React build not found. Please check the deployment.',
-            'requested_path': path
+            'message': 'React index.html not found.',
+            'requested_path': path,
+            'build_dir': react_build_dir,
+            'build_contents': os.listdir(react_build_dir) if os.path.exists(react_build_dir) else []
         }), 500
         
 if __name__ == '__main__':
