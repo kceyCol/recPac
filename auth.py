@@ -282,3 +282,103 @@ def api_test():
         'users_emails': list(users.keys()),
         'timestamp': datetime.now().isoformat()
     })
+
+
+@auth_bp.route('/fix-users', methods=['GET'])
+def fix_users():
+    """Rota para corrigir problema de usuários em produção"""
+    import logging
+    import os
+    logger = logging.getLogger(__name__)
+    
+    try:
+        logger.info("🔧 [FIX] Iniciando correção de usuários")
+        
+        # Verificar diretório atual
+        current_dir = os.getcwd()
+        logger.info(f"🔧 [FIX] Diretório atual: {current_dir}")
+        
+        # Listar arquivos no diretório
+        files = os.listdir('.')
+        logger.info(f"🔧 [FIX] Arquivos no diretório: {files}")
+        
+        # Verificar se users.json existe
+        users_exists = os.path.exists(USERS_FILE)
+        logger.info(f"🔧 [FIX] {USERS_FILE} existe: {users_exists}")
+        
+        if users_exists:
+            # Ler conteúdo do arquivo
+            with open(USERS_FILE, 'r', encoding='utf-8') as f:
+                content = f.read()
+                logger.info(f"🔧 [FIX] Conteúdo do arquivo: {content[:200]}...")
+        
+        # Criar usuários forçadamente
+        users_data = {
+            'alekcey@me.com': {
+                'name': 'alekcey colione',
+                'password': '8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92',
+                'created_at': '2025-07-23T16:02:10.773243',
+                'user_id': '4cdfe8a1'
+            },
+            'admin@test.com': {
+                'name': 'Administrador',
+                'password': '8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92',
+                'created_at': '2025-07-31T17:25:55.209682',
+                'user_id': 'admin123'
+            },
+            'user@test.com': {
+                'name': 'Usuário Teste',
+                'password': '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8',
+                'created_at': '2025-07-31T17:25:55.209682',
+                'user_id': 'user123'
+            },
+            'test@test.com': {
+                'name': 'Usuário Teste',
+                'password': '8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92',
+                'user_id': 'b642b421'
+            }
+        }
+        
+        # Salvar usuários
+        logger.info(f"🔧 [FIX] Salvando {len(users_data)} usuários...")
+        save_users(users_data)
+        
+        # Verificar se foi salvo
+        users_check = load_users()
+        logger.info(f"🔧 [FIX] Verificação: {len(users_check)} usuários carregados")
+        
+        return f'''
+        <html>
+        <body>
+        <h1>✅ Usuários Corrigidos!</h1>
+        <p><strong>Diretório:</strong> {current_dir}</p>
+        <p><strong>Arquivo existe:</strong> {users_exists}</p>
+        <p><strong>Usuários criados:</strong> {len(users_check)}</p>
+        <p><strong>Emails disponíveis:</strong> {list(users_check.keys())}</p>
+        
+        <h2>🔑 Credenciais para Login:</h2>
+        <ul>
+            <li><strong>alekcey@me.com</strong> / <strong>hello</strong></li>
+            <li><strong>admin@test.com</strong> / <strong>hello</strong></li>
+            <li><strong>user@test.com</strong> / <strong>password</strong></li>
+            <li><strong>test@test.com</strong> / <strong>hello</strong></li>
+        </ul>
+        
+        <p><a href="/">← Voltar para o Login</a></p>
+        </body>
+        </html>
+        '''
+        
+    except Exception as e:
+        logger.error(f"💥 [FIX] Erro: {str(e)}")
+        import traceback
+        logger.error(f"💥 [FIX] Traceback: {traceback.format_exc()}")
+        return f'''
+        <html>
+        <body>
+        <h1>❌ Erro na Correção</h1>
+        <p><strong>Erro:</strong> {str(e)}</p>
+        <pre>{traceback.format_exc()}</pre>
+        </body>
+        </html>
+        ''', 500
