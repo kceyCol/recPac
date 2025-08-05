@@ -394,7 +394,7 @@ def api_save_recording():
 @audio_bp.route('/api/recordings', methods=['GET'])
 @login_required
 def api_get_recordings():
-    """Lista gravações do usuário"""
+    """Lista gravações do usuário com lógica corrigida"""
     try:
         user_id = session['user_id']
         user_email = session.get('user_email', '')
@@ -406,6 +406,8 @@ def api_get_recordings():
         # Verificar se o diretório existe
         if not os.path.exists(RECORDINGS_DIR):
             print(f"❌ Diretório {RECORDINGS_DIR} não existe")
+            # Criar diretório se não existir
+            os.makedirs(RECORDINGS_DIR, exist_ok=True)
             return jsonify({
                 'success': True,
                 'recordings': [],
@@ -416,63 +418,85 @@ def api_get_recordings():
         all_files = os.listdir(RECORDINGS_DIR)
         print(f"📋 Arquivos encontrados: {len(all_files)}")
         
-        # Formato antigo para compatibilidade
-        old_format_suffix = f"_{user_email.replace('@', '_').replace('.', '_')}.wav" if user_email else None
-        
         for filename in all_files:
             if not filename.endswith('.wav'):
                 continue
-                
-            # Verificar se pertence ao usuário (novo ou antigo formato)
-            belongs_to_user = (
-                filename.endswith(f"_{user_id}.wav") or 
-                (old_format_suffix and filename.endswith(old_format_suffix))
-            )
+            
+            # CORREÇÃO: Lógica de filtragem mais rigorosa
+            belongs_to_user = False
+            
+            # Verificar formato novo: nome_timestamp_userid.wav
+            if filename.endswith(f"_{user_id}.wav"):
+                belongs_to_user = True
+            
+            # Verificar formato antigo apenas se user_email existir
+            elif user_email:
+                old_format_suffix = f"_{user_email.replace('@', '_').replace('.', '_')}.wav"
+                if filename.endswith(old_format_suffix):
+                    belongs_to_user = True
             
             if not belongs_to_user:
+                print(f"❌ Arquivo não pertence ao usuário: {filename}")
                 continue
                 
             print(f"✅ Arquivo do usuário: {filename}")
             
             filepath = os.path.join(RECORDINGS_DIR, filename)
-            file_size = os.path.getsize(filepath)
             
-            # Data de modificação
-            modified_time = os.path.getmtime(filepath)
-            modified_date = datetime.fromtimestamp(modified_time).strftime('%d/%m/%Y %H:%M')
-            
-            # Verificar transcrição
-            transcription_file = os.path.splitext(filename)[0] + '_transcricao.txt'
-            transcription_path = os.path.join(TRANSCRIPTIONS_DIR, transcription_file)
-            has_transcription = os.path.exists(transcription_path)
-            
-            if '_sessao_' in filename:
-                # Segmento de sessão
-                parts = filename.split('_')
-                if len(parts) >= 3:
-                    session_id = parts[2]
-                    
-                    if session_id not in sessions:
-                        sessions[session_id] = {
-                            'id': session_id,
-                            'segments': [],
-                            'total_size': 0
-                        }
-                    
-                    sessions[session_id]['segments'].append({
+            try:
+                file_size = os.path.getsize(filepath)
+                
+                # Data de modificação
+                modified_time = os.path.getmtime(filepath)
+                modified_date = datetime.fromtimestamp(modified_time).strftime('%d/%m/%Y %H:%M')
+                
+                # Verificar transcrição
+                transcription_file = os.path.splitext(filename)[0] + '_transcricao.txt'
+                transcription_path = os.path.join(TRANSCRIPTIONS_DIR, transcription_file)
+                has_transcription = os.path.exists(transcription_path)
+                
+                # Formatar tamanho
+                if file_size < 1024:
+                    size_str = f"{file_size} B"
+                elif file_size < 1024 * 1024:
+                    size_str = f"{file_size / 1024:.1f} KB"
+                else:
+                    size_str = f"{file_size / (1024 * 1024):.1f} MB"
+                
+                if '_sessao_' in filename:
+                    # Segmento de sessão
+                    parts = filename.split('_')
+                    if len(parts) >= 3:
+                        session_id = parts[2]
+                        
+                        if session_id not in sessions:
+                            sessions[session_id] = {
+                                'id': session_id,
+                                'segments': [],
+                                'total_size': 0
+                            }
+                        
+                        sessions[session_id]['segments'].append({
+                            'filename': filename,
+                            'size': file_size,
+                            'has_transcription': has_transcription
+                        })
+                        sessions[session_id]['total_size'] += file_size
+                else:
+                    # Gravação individual
+                    recordings.append({
                         'filename': filename,
-                        'size': file_size,
+                        'size': size_str,  # CORREÇÃO: Formato legível
+                        'date': modified_date,  # CORREÇÃO: Campo correto
                         'has_transcription': has_transcription
                     })
-                    sessions[session_id]['total_size'] += file_size
-            else:
-                # Gravação individual
-                recordings.append({
-                    'filename': filename,
-                    'size': file_size,
-                    'modified': modified_date,
-                    'has_transcription': has_transcription
-                })
+                    
+            except Exception as file_error:
+                print(f"❌ Erro ao processar arquivo {filename}: {file_error}")
+                continue
+        
+        # Ordenar por data (mais recente primeiro)
+        recordings.sort(key=lambda x: x['date'], reverse=True)
         
         # Converter sessões para lista
         session_list = list(sessions.values())
