@@ -42,8 +42,8 @@ is_production = os.getenv('RENDER') is not None
 
 # Configurações de sessão adaptadas para produção
 if is_production:
-    app.config['SESSION_COOKIE_SECURE'] = True   # HTTPS obrigatório em produção
-    app.config['SESSION_COOKIE_SAMESITE'] = 'None'  # Necessário para CORS em produção
+    app.config['SESSION_COOKIE_SECURE'] = False  # Temporariamente False para teste
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # Mudança para Lax
     allowed_origins = [
         "https://recpac.onrender.com",
         "http://localhost:3000"  # Para desenvolvimento local
