@@ -129,7 +129,7 @@ function Dashboard() {
           },
           credentials: 'include',
           body: JSON.stringify({
-            audio_data: base64Audio,
+            audio: base64Audio,  // ✅ CORREÇÃO: campo correto
             patient_name: patientName
           })
         });
