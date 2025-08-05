@@ -4,7 +4,6 @@
 # Diretórios de dados
 recordings/
 transcriptions/
-users.json
 
 # Python
 __pycache__/
