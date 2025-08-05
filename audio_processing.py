@@ -401,7 +401,7 @@ def api_get_recordings():
         recordings = []
         sessions = {}
         
-        print(f"🔍 Buscando gravações para user_id: {user_id}")
+        print(f"🔍 Buscando gravações para user_id: {user_id}, email: {user_email}")
         
         # Verificar se o diretório existe
         if not os.path.exists(RECORDINGS_DIR):
@@ -422,28 +422,36 @@ def api_get_recordings():
             if not filename.endswith('.wav'):
                 continue
             
-            # CORREÇÃO: Lógica de filtragem mais rigorosa
+            print(f"🔍 Analisando arquivo: {filename}")
+            
+            # CORREÇÃO: Lógica de filtragem mais rigorosa e com debug
             belongs_to_user = False
             
             # Verificar formato novo: nome_timestamp_userid.wav
             if filename.endswith(f"_{user_id}.wav"):
                 belongs_to_user = True
+                print(f"✅ Arquivo pertence ao usuário (formato novo): {filename}")
             
             # Verificar formato antigo apenas se user_email existir
             elif user_email:
+                # Formato antigo: nome_timestamp_email_formatado.wav
                 old_format_suffix = f"_{user_email.replace('@', '_').replace('.', '_')}.wav"
                 if filename.endswith(old_format_suffix):
                     belongs_to_user = True
+                    print(f"✅ Arquivo pertence ao usuário (formato antigo): {filename}")
             
             if not belongs_to_user:
-                print(f"❌ Arquivo não pertence ao usuário: {filename}")
+                print(f"❌ Arquivo NÃO pertence ao usuário: {filename}")
                 continue
-                
-            print(f"✅ Arquivo do usuário: {filename}")
             
             filepath = os.path.join(RECORDINGS_DIR, filename)
             
             try:
+                # Verificar se o arquivo existe e é acessível
+                if not os.path.exists(filepath):
+                    print(f"❌ Arquivo não existe: {filepath}")
+                    continue
+                    
                 file_size = os.path.getsize(filepath)
                 
                 # Data de modificação
@@ -455,7 +463,7 @@ def api_get_recordings():
                 transcription_path = os.path.join(TRANSCRIPTIONS_DIR, transcription_file)
                 has_transcription = os.path.exists(transcription_path)
                 
-                # Formatar tamanho
+                # Formatar tamanho de forma legível
                 if file_size < 1024:
                     size_str = f"{file_size} B"
                 elif file_size < 1024 * 1024:
@@ -484,24 +492,31 @@ def api_get_recordings():
                         sessions[session_id]['total_size'] += file_size
                 else:
                     # Gravação individual
-                    recordings.append({
+                    recording_data = {
                         'filename': filename,
                         'size': size_str,  # CORREÇÃO: Formato legível
-                        'date': modified_date,  # CORREÇÃO: Campo correto
+                        'date': modified_date,  # CORREÇÃO: Campo correto para o frontend
                         'has_transcription': has_transcription
-                    })
+                    }
+                    recordings.append(recording_data)
+                    print(f"✅ Gravação adicionada: {recording_data}")
                     
             except Exception as file_error:
                 print(f"❌ Erro ao processar arquivo {filename}: {file_error}")
                 continue
         
         # Ordenar por data (mais recente primeiro)
-        recordings.sort(key=lambda x: x['date'], reverse=True)
+        try:
+            recordings.sort(key=lambda x: datetime.strptime(x['date'], '%d/%m/%Y %H:%M'), reverse=True)
+        except Exception as sort_error:
+            print(f"⚠️ Erro ao ordenar gravações: {sort_error}")
+            # Manter ordem original se houver erro na ordenação
         
         # Converter sessões para lista
         session_list = list(sessions.values())
         
-        print(f"📊 Encontradas {len(recordings)} gravações e {len(session_list)} sessões")
+        print(f"📊 RESULTADO FINAL: {len(recordings)} gravações e {len(session_list)} sessões")
+        print(f"📋 Gravações encontradas: {[r['filename'] for r in recordings]}")
         
         return jsonify({
             'success': True,
@@ -510,11 +525,17 @@ def api_get_recordings():
         })
         
     except Exception as e:
-        print(f"❌ Erro ao listar gravações: {str(e)}")
+        print(f"❌ ERRO CRÍTICO ao listar gravações: {str(e)}")
+        import traceback
+        print(f"📋 Traceback: {traceback.format_exc()}")
+        
+        # CORREÇÃO: Retornar lista vazia em caso de erro, não falhar
         return jsonify({
-            'success': False,
-            'message': f'Erro ao listar gravações: {str(e)}'
-        }), 500
+            'success': True,  # Manter como True para não quebrar o frontend
+            'recordings': [],
+            'sessions': [],
+            'error_message': f'Erro interno: {str(e)}'
+        })
 
 @audio_bp.route('/transcribe', methods=['POST'])
 @login_required
