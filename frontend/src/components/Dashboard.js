@@ -12,6 +12,29 @@ function Dashboard() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalContent, setModalContent] = useState('');
   const [modalTitle, setModalTitle] = useState('');
+  
+  // NOVO: Estados para o sistema de log
+  const [logs, setLogs] = useState([]);
+  const [showLogs, setShowLogs] = useState(false);
+  
+  // NOVO: Função para adicionar log
+  const addLog = (message, type = 'info') => {
+    const timestamp = new Date().toLocaleTimeString();
+    const newLog = {
+      id: Date.now(),
+      timestamp,
+      message,
+      type // 'info', 'success', 'error', 'warning'
+    };
+    setLogs(prev => [...prev, newLog]);
+    setShowLogs(true);
+  };
+  
+  // NOVO: Função para limpar logs
+  const clearLogs = () => {
+    setLogs([]);
+    setShowLogs(false);
+  };
 
   useEffect(() => {
     fetchRecordings();
@@ -209,18 +232,22 @@ function Dashboard() {
 
   const handleTranscribe = async (filename) => {
     try {
+      // Limpar logs anteriores e iniciar novo processo
+      clearLogs();
+      addLog(`Iniciando transcrição de ${filename}...`);
+      
       // Iniciar o status de transcrição
       setTranscriptionStatus(prev => ({
         ...prev,
         [filename]: 'Iniciando transcrição...'
       }));
-
+  
       // Passo 1: Preparando arquivo
       setTranscriptionStatus(prev => ({
         ...prev,
         [filename]: 'Preparando arquivo de áudio...'
       }));
-
+  
       const response = await fetch('/transcribe', {
         method: 'POST',
         headers: {
@@ -233,6 +260,7 @@ function Dashboard() {
       });
       
       // Passo 2: Processando
+      addLog('Enviando para processamento de IA...');
       setTranscriptionStatus(prev => ({
         ...prev,
         [filename]: 'Processando transcrição com IA...'
@@ -242,6 +270,7 @@ function Dashboard() {
       
       if (result.success) {
         // Passo 3: Finalizando
+        addLog('Processamento concluído, salvando resultado...');
         setTranscriptionStatus(prev => ({
           ...prev,
           [filename]: 'Salvando transcrição...'
@@ -280,16 +309,17 @@ function Dashboard() {
         }, 5000);
       }
     } catch (error) {
+      addLog(`Erro de conexão: ${error.message}`, 'error');
       setTranscriptionStatus(prev => ({
         ...prev,
-        [filename]: `Erro ao transcrever: ${error.message}`
+        [filename]: `Erro: ${error.message}`
       }));
       
-      // Limpar status de erro após 5 segundos
       setTimeout(() => {
         setTranscriptionStatus(prev => {
           const newStatus = { ...prev };
           delete newStatus[filename];
+          return newStatus;
         });
       }, 5000);
     }
@@ -600,3 +630,61 @@ function Dashboard() {
 }
 
 export default Dashboard;
+
+// Adicionar antes do fechamento do return principal, após o modal
+
+      {/* Sistema de Log de Atividades */}
+      {showLogs && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-blue-800 font-semibold">📋 Log de Transcrição</h3>
+              <div className="space-x-2">
+                <button
+                  onClick={clearLogs}
+                  className="text-blue-600 hover:text-blue-800 text-sm"
+                >
+                  Limpar
+                </button>
+                <button
+                  onClick={() => setShowLogs(false)}
+                  className="text-blue-600 hover:text-blue-800 text-sm"
+                >
+                  Minimizar
+                </button>
+              </div>
+            </div>
+            <div className="space-y-1 max-h-40 overflow-y-auto">
+              {logs.map((log) => (
+                <div key={log.id} className="flex items-center space-x-2 text-sm">
+                  <span className="text-blue-600 font-mono">{log.timestamp}</span>
+                  <span className={`${
+                    log.type === 'success' ? 'text-green-600' :
+                    log.type === 'error' ? 'text-red-600' :
+                    log.type === 'warning' ? 'text-yellow-600' :
+                    'text-gray-700'
+                  }`}>
+                    {log.type === 'success' ? '✅' :
+                     log.type === 'error' ? '❌' :
+                     log.type === 'warning' ? '⚠️' : 'ℹ️'} {log.message}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Botão para mostrar logs quando minimizado */}
+      {!showLogs && logs.length > 0 && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
+          <button
+            onClick={() => setShowLogs(true)}
+            className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm transition-colors shadow-md"
+          >
+            📋 Mostrar Log de Transcrição ({logs.length} registros)
+          </button>
+        </div>
+      )}
+    </div>
+  );
