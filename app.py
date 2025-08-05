@@ -1113,10 +1113,12 @@ def serve_react_app(path):
     # Debug: Log da requisição
     print(f"DEBUG: Requisição para path: '{path}'")
     
-    # Se for uma rota da API, não interceptar
+    # Se for uma rota da API, NÃO interceptar - deixar o Flask processar
     if path.startswith(('api/', 'auth/', 'audio/', 'app', 'transcribe', 'download', 'rename_recording', 'transcriptions', 'recordings', 'delete_recording', 'finalize_session', 'view_transcription', 'export_summary_pdf', 'export_summary_docx', 'static/')):
-        print(f"DEBUG: Rota de API detectada: {path}")
-        return jsonify({'error': 'Route not found'}), 404
+        print(f"DEBUG: Rota de API detectada: {path} - deixando Flask processar")
+        # NÃO retornar erro aqui - deixar o Flask continuar processando
+        from flask import abort
+        abort(404)  # Isso permite que outras rotas sejam testadas
     
     react_build_dir = 'frontend/build'
     
@@ -1149,16 +1151,14 @@ def serve_react_app(path):
     # Servir index.html para roteamento do React (SPA)
     index_path = os.path.join(react_build_dir, 'index.html')
     if os.path.exists(index_path):
-        print(f"DEBUG: Servindo index.html para path: '{path}'")
+        print(f"DEBUG: Servindo index.html para roteamento do React")
         return send_from_directory(react_build_dir, 'index.html')
     else:
         print(f"DEBUG: index.html não encontrado em: {index_path}")
         return jsonify({
-            'error': 'Frontend not available',
-            'message': 'React index.html not found.',
-            'requested_path': path,
-            'build_dir': react_build_dir,
-            'build_contents': os.listdir(react_build_dir) if os.path.exists(react_build_dir) else []
+            'error': 'Frontend index.html not found',
+            'message': 'React index.html does not exist. Please check the deployment.',
+            'index_path': index_path
         }), 500
         
 if __name__ == '__main__':
