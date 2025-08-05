@@ -41,53 +41,57 @@ def login_required(f):
 @auth_bp.route('/api/login', methods=['POST'])
 def api_login():
     """API de login"""
+    import logging
+    import sys
+    
+    # Configurar logging para aparecer no Render
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+    logger = logging.getLogger(__name__)
+    
     try:
-        print(f"🔍 [LOGIN DEBUG] Iniciando processo de login")
-        print(f"🔍 [LOGIN DEBUG] Request method: {request.method}")
-        print(f"🔍 [LOGIN DEBUG] Request headers: {dict(request.headers)}")
-        print(f"🔍 [LOGIN DEBUG] Request content type: {request.content_type}")
+        logger.info(f"🔍 [LOGIN] Iniciando processo de login")
+        logger.info(f"🔍 [LOGIN] Request method: {request.method}")
+        logger.info(f"🔍 [LOGIN] Content type: {request.content_type}")
         
         # Verificar se os dados foram enviados
         if not request.json:
-            print(f"❌ [LOGIN DEBUG] Dados não enviados - request.json é None")
+            logger.error(f"❌ [LOGIN] Dados não enviados - request.json é None")
             return jsonify({
                 'success': False,
                 'message': 'Dados não enviados'
             }), 400
         
-        print(f"🔍 [LOGIN DEBUG] Request JSON: {request.json}")
+        logger.info(f"🔍 [LOGIN] Request JSON recebido")
         
         email = request.json.get('email', '').strip().lower()
         password = request.json.get('password', '')
         
-        print(f"🔍 [LOGIN DEBUG] Email extraído: '{email}'")
-        print(f"🔍 [LOGIN DEBUG] Password length: {len(password)}")
+        logger.info(f"🔍 [LOGIN] Email: '{email}', Password length: {len(password)}")
         
         # Validar campos obrigatórios
         if not email or not password:
-            print(f"❌ [LOGIN DEBUG] Campos obrigatórios ausentes - email: '{email}', password: {bool(password)}")
+            logger.error(f"❌ [LOGIN] Campos obrigatórios ausentes")
             return jsonify({
                 'success': False,
                 'message': 'Email e senha são obrigatórios'
             }), 400
         
         # Carregar usuários
-        print(f"🔍 [LOGIN DEBUG] Carregando usuários do arquivo...")
+        logger.info(f"🔍 [LOGIN] Carregando usuários...")
         users = load_users()
-        print(f"🔍 [LOGIN DEBUG] Usuários carregados: {list(users.keys())}")
+        logger.info(f"🔍 [LOGIN] Usuários encontrados: {len(users)} usuários")
+        logger.info(f"🔍 [LOGIN] Emails disponíveis: {list(users.keys())}")
         
         # Verificar se usuário existe e senha está correta
         if email in users:
-            print(f"✅ [LOGIN DEBUG] Usuário encontrado: {email}")
+            logger.info(f"✅ [LOGIN] Usuário encontrado: {email}")
             stored_hash = users[email]['password']
             input_hash = hash_password(password)
             
-            print(f"🔍 [LOGIN DEBUG] Hash armazenado: {stored_hash[:10]}...")
-            print(f"🔍 [LOGIN DEBUG] Hash da entrada: {input_hash[:10]}...")
-            print(f"🔍 [LOGIN DEBUG] Hashes coincidem: {stored_hash == input_hash}")
+            logger.info(f"🔍 [LOGIN] Verificando senha...")
             
             if stored_hash == input_hash:
-                print(f"✅ [LOGIN DEBUG] Senha correta, configurando sessão...")
+                logger.info(f"✅ [LOGIN] Senha correta, configurando sessão...")
                 
                 # Login bem-sucedido - limpar e configurar sessão
                 session.clear()
@@ -96,11 +100,7 @@ def api_login():
                 session['user_id'] = users[email]['user_id']
                 session.permanent = True
                 
-                print(f"✅ [LOGIN DEBUG] Sessão configurada:")
-                print(f"   - user_email: {session.get('user_email')}")
-                print(f"   - user_name: {session.get('user_name')}")
-                print(f"   - user_id: {session.get('user_id')}")
-                print(f"   - permanent: {session.permanent}")
+                logger.info(f"✅ [LOGIN] Sessão configurada com sucesso")
                 
                 return jsonify({
                     'success': True,
@@ -111,21 +111,21 @@ def api_login():
                     }
                 }), 200
             else:
-                print(f"❌ [LOGIN DEBUG] Senha incorreta")
+                logger.error(f"❌ [LOGIN] Senha incorreta para {email}")
         else:
-            print(f"❌ [LOGIN DEBUG] Usuário não encontrado: {email}")
+            logger.error(f"❌ [LOGIN] Usuário não encontrado: {email}")
         
         # Login falhou
-        print(f"❌ [LOGIN DEBUG] Login falhou - retornando erro 401")
+        logger.error(f"❌ [LOGIN] Login falhou - retornando erro 401")
         return jsonify({
             'success': False,
             'message': 'Email ou senha incorretos'
         }), 401
         
     except Exception as e:
-        print(f"💥 [LOGIN DEBUG] Erro interno: {str(e)}")
+        logger.error(f"💥 [LOGIN] Erro interno: {str(e)}")
         import traceback
-        print(f"💥 [LOGIN DEBUG] Traceback: {traceback.format_exc()}")
+        logger.error(f"💥 [LOGIN] Traceback: {traceback.format_exc()}")
         return jsonify({
             'success': False,
             'message': f'Erro interno: {str(e)}'
@@ -267,3 +267,18 @@ def create_test_user():
         
     except Exception as e:
         return f'❌ Erro ao criar usuários de teste: {str(e)}'
+
+@auth_bp.route('/api/test', methods=['GET'])
+def api_test():
+    """Rota de teste para verificar se a API está funcionando"""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info("🧪 [TEST] Rota de teste acessada")
+    
+    users = load_users()
+    return jsonify({
+        'status': 'API funcionando',
+        'users_count': len(users),
+        'users_emails': list(users.keys()),
+        'timestamp': datetime.now().isoformat()
+    })

@@ -34,6 +34,17 @@ from utils import configure_gemini, create_directories, RECORDINGS_DIR, TRANSCRI
 # Carregar variáveis de ambiente
 load_dotenv()
 
+# Configurar logging para produção
+import logging
+import sys
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stdout
+)
+logger = logging.getLogger(__name__)
+logger.info("🚀 Aplicação iniciando...")
+
 app = Flask(__name__, static_folder=None, static_url_path=None)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'sua_chave_secreta_aqui_mude_em_producao')
 
