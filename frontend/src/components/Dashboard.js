@@ -12,12 +12,14 @@ function Dashboard() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalContent, setModalContent] = useState('');
   const [modalTitle, setModalTitle] = useState('');
+  const [showPatientModal, setShowPatientModal] = useState(false);
+  const [currentAudioBlob, setCurrentAudioBlob] = useState(null);
   
-  // NOVO: Estados para o sistema de log
+  // Sistema de log
   const [logs, setLogs] = useState([]);
   const [showLogs, setShowLogs] = useState(false);
   
-  // NOVO: Função para adicionar log
+  // Função para adicionar log
   const addLog = (message, type = 'info') => {
     const timestamp = new Date().toLocaleTimeString();
     const newLog = {
@@ -30,7 +32,7 @@ function Dashboard() {
     setShowLogs(true);
   };
   
-  // NOVO: Função para limpar logs
+  // Função para limpar logs
   const clearLogs = () => {
     setLogs([]);
     setShowLogs(false);
@@ -79,9 +81,6 @@ function Dashboard() {
       setLoading(false);
     }
   };
-
-  const [showPatientModal, setShowPatientModal] = useState(false);
-  const [currentAudioBlob, setCurrentAudioBlob] = useState(null);
   
   const handleRecordingComplete = async (audioBlob) => {
     // Armazenar o blob e mostrar o modal
@@ -131,7 +130,7 @@ function Dashboard() {
     try {
       const response = await fetch(`/download/${filename}`, {
         method: 'GET',
-        credentials: 'include', // Importante: inclui cookies de sessão
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json'
         }
@@ -201,7 +200,7 @@ function Dashboard() {
             alert('Erro ao renomear arquivo: ' + error.message);
         }
     }
-};
+  };
 
   const handleDelete = async (filename) => {
     if (window.confirm(`Tem certeza que deseja deletar ${filename}?`)) {
@@ -243,6 +242,7 @@ function Dashboard() {
       }));
   
       // Passo 1: Preparando arquivo
+      addLog('Preparando arquivo de áudio...');
       setTranscriptionStatus(prev => ({
         ...prev,
         [filename]: 'Preparando arquivo de áudio...'
@@ -270,7 +270,7 @@ function Dashboard() {
       
       if (result.success) {
         // Passo 3: Finalizando
-        addLog('Processamento concluído, salvando resultado...');
+        addLog('Processamento concluído, salvando resultado...', 'success');
         setTranscriptionStatus(prev => ({
           ...prev,
           [filename]: 'Salvando transcrição...'
@@ -279,6 +279,7 @@ function Dashboard() {
         await fetchRecordings();
         
         // Sucesso
+        addLog('Transcrição concluída com sucesso!', 'success');
         setTranscriptionStatus(prev => ({
           ...prev,
           [filename]: 'Transcrição concluída com sucesso!'
@@ -294,6 +295,7 @@ function Dashboard() {
         }, 3000);
         
       } else {
+        addLog(`Erro na transcrição: ${result.message}`, 'error');
         setTranscriptionStatus(prev => ({
           ...prev,
           [filename]: `Erro na transcrição: ${result.message}`
@@ -325,42 +327,12 @@ function Dashboard() {
     }
   };
 
-  const handleViewTranscription = async (filename) => {
-    try {
-      const transcriptionFile = filename.replace('.wav', '_transcricao.txt');
-      const response = await fetch(`/view_transcription/${transcriptionFile}`, {
-        credentials: 'include'
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          setModalTitle(`Transcrição - ${filename}`);
-          setModalContent(data.content || 'Transcrição não encontrada.');
-          setModalOpen(true);
-        } else {
-          alert('Erro ao carregar transcrição: ' + data.message);
-        }
-      } else {
-        alert('Erro ao carregar transcrição.');
-      }
-    } catch (error) {
-      alert('Erro ao carregar transcrição: ' + error.message);
-    }
-  };
-
-  const closeModal = () => {
-    setModalOpen(false);
-    setModalContent('');
-    setModalTitle('');
-  };
-
   const handleDownloadTranscription = async (filename) => {
     try {
       const transcriptionFile = filename.replace('.wav', '_transcricao.txt');
       const response = await fetch(`/download_transcription/${transcriptionFile}`, {
         method: 'GET',
-        credentials: 'include', // Importante: inclui cookies de sessão
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json'
         }
@@ -386,6 +358,12 @@ function Dashboard() {
     }
   };
 
+  const closeModal = () => {
+    setModalOpen(false);
+    setModalContent('');
+    setModalTitle('');
+  };
+
   const handleLogout = () => {
     logout();
   };
@@ -398,7 +376,6 @@ function Dashboard() {
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-4">
               <h1 className="text-2xl font-bold text-gray-900">RecPac Dashboard</h1>
-              {/* REMOVIDO: Botão "Ver Transcrições" do topo */}
             </div>
             <div className="flex items-center space-x-4">
               <span className="text-gray-700">Bem-vindo, {user?.username}</span>
@@ -453,6 +430,16 @@ function Dashboard() {
                         )}
                       </div>
                     </div>
+                    
+                    {/* Status da transcrição */}
+                    {transcriptionStatus[recording.filename] && (
+                      <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded text-sm text-blue-700">
+                        <div className="flex items-center">
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                          {transcriptionStatus[recording.filename]}
+                        </div>
+                      </div>
+                    )}
                     
                     {/* Botões de Ação */}
                     <div className="flex flex-wrap gap-2">
@@ -511,27 +498,7 @@ function Dashboard() {
                       >
                         Deletar
                       </button>
-                      
-                      {/* Status da transcrição */}
-                      {transcriptionStatus[recording.filename] && (
-                        <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded text-sm text-blue-700">
-                          <div className="flex items-center">
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
-                            {transcriptionStatus[recording.filename]}
-                          </div>
-                        </div>
-                      )}
                     </div>
-                    
-                    {/* Remover este bloco duplicado de status da transcrição */}
-                    {/* {transcriptionStatus[recording.filename] && (
-                      <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded text-sm text-blue-700">
-                        <div className="flex items-center">
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
-                          {transcriptionStatus[recording.filename]}
-                        </div>
-                      </div>
-                    )} */}
                   </div>
                 ))}
               </div>
@@ -541,97 +508,6 @@ function Dashboard() {
           </div>
         </div>
       </main>
-
-      {/* Modal de Transcrição */}
-      {modalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] flex flex-col">
-            {/* Header do Modal */}
-            <div className="flex items-center justify-between p-6 border-b">
-              <h3 className="text-lg font-semibold text-gray-900">{modalTitle}</h3>
-              <button
-                onClick={closeModal}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            
-            {/* Conteúdo do Modal */}
-            <div className="flex-1 overflow-y-auto p-6">
-              <div className="bg-gray-50 rounded-lg p-4 min-h-[200px]">
-                <pre className="whitespace-pre-wrap text-gray-800 font-mono text-sm leading-relaxed">
-                  {modalContent}
-                </pre>
-              </div>
-            </div>
-            
-            {/* Footer do Modal */}
-            <div className="flex justify-end gap-3 p-6 border-t">
-              <button
-                onClick={closeModal}
-                className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded transition-colors"
-              >
-                Fechar
-              </button>
-              <button
-                onClick={() => {
-                  const filename = modalTitle.replace('Transcrição - ', '');
-                  handleDownloadTranscription(filename);
-                }}
-                className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded transition-colors"
-              >
-                Download
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {/* Modal de Nome do Paciente */}
-      {showPatientModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-            <h3 className="text-lg font-semibold mb-4">👤 Nome do Paciente</h3>
-            <input 
-              type="text" 
-              placeholder="Digite o nome do paciente (opcional)"
-              className="w-full p-3 border border-gray-300 rounded-lg mb-4"
-              onKeyPress={(e) => {
-                if (e.key === 'Enter') {
-                  saveRecordingWithPatientName(e.target.value.trim());
-                }
-              }}
-              autoFocus
-            />
-            <div className="flex gap-3">
-              <button 
-                className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-                onClick={(e) => {
-                  const input = e.target.closest('.bg-white').querySelector('input');
-                  saveRecordingWithPatientName(input.value.trim());
-                }}
-              >
-                💾 Salvar com Nome
-              </button>
-              <button 
-                className="flex-1 bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700"
-                onClick={() => saveRecordingWithPatientName('')}
-              >
-                📁 Salvar sem Nome
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-export default Dashboard;
-
-// Adicionar antes do fechamento do return principal, após o modal
 
       {/* Sistema de Log de Atividades */}
       {showLogs && (
@@ -686,5 +562,45 @@ export default Dashboard;
           </button>
         </div>
       )}
+
+      {/* Modal de Nome do Paciente */}
+      {showPatientModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold mb-4">👤 Nome do Paciente</h3>
+            <input 
+              type="text" 
+              placeholder="Digite o nome do paciente (opcional)"
+              className="w-full p-3 border border-gray-300 rounded-lg mb-4"
+              onKeyPress={(e) => {
+                if (e.key === 'Enter') {
+                  saveRecordingWithPatientName(e.target.value.trim());
+                }
+              }}
+              autoFocus
+            />
+            <div className="flex gap-3">
+              <button 
+                className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+                onClick={(e) => {
+                  const input = e.target.closest('.bg-white').querySelector('input');
+                  saveRecordingWithPatientName(input.value.trim());
+                }}
+              >
+                💾 Salvar com Nome
+              </button>
+              <button 
+                className="flex-1 bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700"
+                onClick={() => saveRecordingWithPatientName('')}
+              >
+                📁 Salvar sem Nome
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+export default Dashboard;
