@@ -1105,79 +1105,40 @@ def get_default_prompt():
         return jsonify({'prompt': default_prompt})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-# ÚNICA rota catch-all para o React Router
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def serve_react_app(path):
-    # Debug: Log da requisição
-    print(f"DEBUG: Requisição para path: '{path}'")
-    
-    # Se for uma rota da API, NÃO interceptar - deixar o Flask processar
-    api_prefixes = [
-        'api/',
-        'auth/', 
-        'audio/',
-        'app',
-        'transcribe',
-        'download',
-        'rename_recording',
-        'transcriptions',
-        'recordings',
-        'delete_recording',
-        'finalize_session',
-        'view_transcription',
-        'export_summary_pdf',
-        'export_summary_docx',
-        'static/',
-        'create-test-user'  # Adicionado para teste
-    ]
-    
-    if any(path.startswith(prefix) for prefix in api_prefixes):
-        print(f"DEBUG: Rota de API detectada: {path} - deixando Flask processar")
-        # Usar abort(404) para permitir que outras rotas sejam processadas
+# Rota específica para a página inicial
+@app.route('/')
+def serve_react_index():
+    react_build_dir = 'frontend/build'
+    index_path = os.path.join(react_build_dir, 'index.html')
+    if os.path.exists(index_path):
+        return send_from_directory(react_build_dir, 'index.html')
+    else:
+        return jsonify({'error': 'Frontend build not found'}), 500
+
+# Rota para assets específicos do React (favicon, manifest, etc.)
+@app.route('/<path:filename>')
+def serve_react_assets(filename):
+    # IMPORTANTE: NÃO interceptar rotas que começam com 'api'
+    if filename.startswith('api'):
+        # Retornar 404 para permitir que outras rotas sejam testadas
         from flask import abort
         abort(404)
     
     react_build_dir = 'frontend/build'
     
-    # Verificar se o diretório build existe
-    if not os.path.exists(react_build_dir):
-        print(f"DEBUG: Diretório build não encontrado: {react_build_dir}")
-        return jsonify({
-            'error': 'Frontend build not found',
-            'message': 'React build directory does not exist. Please check the deployment.',
-            'build_dir': react_build_dir,
-            'current_dir': os.getcwd(),
-            'files_in_current_dir': os.listdir('.') if os.path.exists('.') else []
-        }), 500
-    
-    # Verificar se é um asset específico do React
+    # Assets específicos do React
     react_assets = ['favicon.ico', 'manifest.json', 'robots.txt', 'logo192.png', 'logo512.png']
-    if path in react_assets:
-        asset_path = os.path.join(react_build_dir, path)
+    if filename in react_assets:
+        asset_path = os.path.join(react_build_dir, filename)
         if os.path.exists(asset_path):
-            print(f"DEBUG: Servindo asset: {path}")
-            return send_from_directory(react_build_dir, path)
+            return send_from_directory(react_build_dir, filename)
     
-    # Verificar se o arquivo específico existe no build
-    if path:
-        file_path = os.path.join(react_build_dir, path)
-        if os.path.exists(file_path):
-            print(f"DEBUG: Servindo arquivo específico: {path}")
-            return send_from_directory(react_build_dir, path)
-    
-    # Servir index.html para roteamento do React (SPA)
+    # Para qualquer outra rota que não seja API, servir index.html (SPA routing)
     index_path = os.path.join(react_build_dir, 'index.html')
     if os.path.exists(index_path):
-        print(f"DEBUG: Servindo index.html para roteamento do React")
         return send_from_directory(react_build_dir, 'index.html')
     else:
-        print(f"DEBUG: index.html não encontrado em: {index_path}")
-        return jsonify({
-            'error': 'Frontend index.html not found',
-            'message': 'React index.html does not exist. Please check the deployment.',
-            'index_path': index_path
-        }), 500
+        return jsonify({'error': 'Frontend build not found'}), 500
         
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
