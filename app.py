@@ -37,16 +37,29 @@ load_dotenv()
 app = Flask(__name__, static_folder=None, static_url_path=None)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'sua_chave_secreta_aqui_mude_em_producao')
 
-# Configurações de sessão
-app.config['SESSION_COOKIE_SECURE'] = False  # Para desenvolvimento (HTTP)
+# Detectar se está em produção (Render)
+is_production = os.getenv('RENDER') is not None
+
+# Configurações de sessão adaptadas para produção
+if is_production:
+    app.config['SESSION_COOKIE_SECURE'] = True   # HTTPS obrigatório em produção
+    app.config['SESSION_COOKIE_SAMESITE'] = 'None'  # Necessário para CORS em produção
+    allowed_origins = [
+        "https://recpac.onrender.com",
+        "http://localhost:3000"  # Para desenvolvimento local
+    ]
+else:
+    app.config['SESSION_COOKIE_SECURE'] = False  # HTTP para desenvolvimento
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    allowed_origins = ["http://localhost:3000"]
+
 app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hora
 
-# Configurar CORS
+# Configurar CORS com origens dinâmicas
 CORS(app, 
      supports_credentials=True,
-     origins=["http://localhost:3000"],
+     origins=allowed_origins,
      allow_headers=["Content-Type", "Authorization"],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 )
