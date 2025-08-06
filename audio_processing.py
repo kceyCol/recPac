@@ -335,49 +335,113 @@ def create_docx_from_text(text, title="Resumo da Consulta"):
 @audio_bp.route('/api/save_recording', methods=['POST'])
 @login_required
 def api_save_recording():
+    """Salva gravação com processamento otimizado para deploy"""
     try:
         data = request.json
-        audio_data = data['audio']
+        audio_data = data.get('audio')
         patient_name = data.get('patient_name', '')
+        
+        if not audio_data:
+            return jsonify({
+                'success': False,
+                'message': 'Dados de áudio não fornecidos'
+            }), 400
         
         # Decodificar base64
         if audio_data.startswith('data:audio'):
-            audio_data = audio_data.split(',')[1]
+            # Extrair tipo MIME e dados
+            header, audio_data = audio_data.split(',', 1)
+            mime_type = header.split(':')[1].split(';')[0]
+        else:
+            mime_type = 'audio/wav'  # fallback
         
-        audio_bytes = base64.b64decode(audio_data)
+        try:
+            audio_bytes = base64.b64decode(audio_data)
+        except Exception as e:
+            print(f"❌ Erro ao decodificar base64: {e}")
+            return jsonify({
+                'success': False,
+                'message': 'Erro ao decodificar dados de áudio'
+            }), 400
         
-        # Gerar nome do arquivo
+        # Validar tamanho do arquivo
+        if len(audio_bytes) < 1000:  # Menos de 1KB
+            return jsonify({
+                'success': False,
+                'message': 'Arquivo de áudio muito pequeno ou corrompido'
+            }), 400
+        
+        # Gerar nome único do arquivo
         user_id = session.get('user_id', 'unknown')
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        unique_id = str(int(time.time() * 1000))[-6:]  # 6 últimos dígitos do timestamp
         
         if patient_name:
             safe_patient_name = sanitize_filename(patient_name)
-            filename = f"{safe_patient_name}_{timestamp}_{user_id}.wav"
+            filename = f"{safe_patient_name}_{timestamp}_{unique_id}_{user_id}.wav"
         else:
-            filename = f"recording_{timestamp}_{user_id}.wav"
+            filename = f"recording_{timestamp}_{unique_id}_{user_id}.wav"
         
+        # Garantir que o diretório existe
+        os.makedirs(RECORDINGS_DIR, exist_ok=True)
         file_path = os.path.join(RECORDINGS_DIR, filename)
         
-        # SIMPLIFICADO: Salvar diretamente (áudio já processado no frontend)
+        # Verificar se arquivo já existe (evitar duplicação)
+        if os.path.exists(file_path):
+            counter = 1
+            base_name, ext = os.path.splitext(filename)
+            while os.path.exists(file_path):
+                filename = f"{base_name}_({counter}){ext}"
+                file_path = os.path.join(RECORDINGS_DIR, filename)
+                counter += 1
+        
+        # Processar áudio com pydub para garantir compatibilidade
         try:
-            with open(file_path, 'wb') as f:
-                f.write(audio_bytes)
-            print(f"✅ Gravação salva: {filename} ({len(audio_bytes)} bytes)")
+            # Carregar áudio original
+            audio_segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
+            
+            # Configurações otimizadas para deploy
+            audio_segment = audio_segment.set_channels(1)  # Mono
+            audio_segment = audio_segment.set_frame_rate(16000)  # 16kHz
+            audio_segment = audio_segment.normalize()  # Normalizar volume
+            
+            # Exportar como WAV de alta qualidade
+            audio_segment.export(
+                file_path, 
+                format="wav",
+                parameters=["-acodec", "pcm_s16le"]  # PCM 16-bit
+            )
+            
+            file_size = os.path.getsize(file_path)
+            print(f"✅ Gravação processada e salva: {filename} ({file_size} bytes)")
+            
         except Exception as e:
-            print(f"❌ Erro ao salvar arquivo: {e}")
-            raise
+            print(f"⚠️ Erro no processamento com pydub: {e}")
+            # Fallback: salvar arquivo original
+            try:
+                with open(file_path, 'wb') as f:
+                    f.write(audio_bytes)
+                file_size = len(audio_bytes)
+                print(f"✅ Gravação salva (fallback): {filename} ({file_size} bytes)")
+            except Exception as fallback_error:
+                print(f"❌ Erro no fallback: {fallback_error}")
+                return jsonify({
+                    'success': False,
+                    'message': 'Erro ao salvar arquivo de áudio'
+                }), 500
         
         return jsonify({
             'success': True,
             'message': 'Gravação salva com sucesso!',
-            'filename': filename
+            'filename': filename,
+            'size': file_size
         })
         
     except Exception as e:
-        print(f"❌ Erro ao salvar gravação: {e}")
+        print(f"❌ Erro geral ao salvar gravação: {e}")
         return jsonify({
             'success': False,
-            'message': f'Erro ao salvar gravação: {str(e)}'
+            'message': f'Erro interno do servidor: {str(e)}'
         }), 500
 
 @audio_bp.route('/api/recordings', methods=['GET'])
