@@ -66,10 +66,10 @@ const RecordingControls = ({ onRecordingComplete }) => {
 
       mediaRecorderRef.current.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { 
-          type: mediaRecorderRef.current.mimeType 
+          type: 'audio/wav' // Forçar tipo WAV
         });
         
-        // Processar áudio no frontend antes de enviar
+        // Processar áudio no frontend
         const processedBlob = await processAudioBlob(audioBlob);
         onRecordingComplete(processedBlob);
         

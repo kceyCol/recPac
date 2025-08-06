@@ -346,7 +346,7 @@ def api_save_recording():
         
         audio_bytes = base64.b64decode(audio_data)
         
-        # Gerar nome do arquivo usando user_id da sessão
+        # Gerar nome do arquivo
         user_id = session.get('user_id', 'unknown')
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
@@ -356,27 +356,16 @@ def api_save_recording():
         else:
             filename = f"recording_{timestamp}_{user_id}.wav"
         
-        # Salvar arquivo
         file_path = os.path.join(RECORDINGS_DIR, filename)
         
-        # Converter para WAV usando pydub
+        # SIMPLIFICADO: Salvar diretamente (áudio já processado no frontend)
         try:
-            # Criar AudioSegment a partir dos bytes
-            audio_segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
-            
-            # Normalizar e configurar
-            audio_segment = audio_segment.normalize()
-            audio_segment = audio_segment.set_channels(1)  # Mono
-            audio_segment = audio_segment.set_frame_rate(16000)  # 16kHz
-            
-            # Exportar como WAV
-            audio_segment.export(file_path, format="wav")
-            
-        except Exception as e:
-            print(f"❌ Erro ao processar áudio: {e}")
-            # Fallback: salvar bytes diretamente
             with open(file_path, 'wb') as f:
                 f.write(audio_bytes)
+            print(f"✅ Gravação salva: {filename} ({len(audio_bytes)} bytes)")
+        except Exception as e:
+            print(f"❌ Erro ao salvar arquivo: {e}")
+            raise
         
         return jsonify({
             'success': True,
