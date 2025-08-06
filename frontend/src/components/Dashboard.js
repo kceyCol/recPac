@@ -17,6 +17,7 @@ function Dashboard() {
   // Estados para gravação
   const [showPatientModal, setShowPatientModal] = useState(false);
   const [currentAudioBlob, setCurrentAudioBlob] = useState(null);
+  const [currentRecordingData, setCurrentRecordingData] = useState(null);
   
   // Sistema de log melhorado
   const [transcriptionLogs, setTranscriptionLogs] = useState({});
