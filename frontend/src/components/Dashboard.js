@@ -108,48 +108,54 @@ function Dashboard() {
   };
   
   // ===== HANDLERS DE GRAVAÇÃO =====
-  
-  const handleRecordingComplete = async (audioBlob) => {
-    setCurrentAudioBlob(audioBlob);
+ // Atualizar a função handleRecordingComplete
+const handleRecordingComplete = async (recordingData) => {
+  if (recordingData.session_id) {
+    // Gravação por chunks - mostrar modal para nome
+    setCurrentRecordingData(recordingData);
     setShowPatientModal(true);
-  };
-  
-  const saveRecordingWithPatientName = async (patientName = '') => {
-    if (!currentAudioBlob) return;
-    
-    try {
-      const reader = new FileReader();
-      reader.onloadend = async function() {
-        const base64Audio = reader.result;
-        
-        const response = await fetch('/api/save_recording', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-          body: JSON.stringify({
-            audio: base64Audio,  // ✅ CORREÇÃO: campo correto
-            patient_name: patientName
-          })
-        });
-        
-        const result = await response.json();
-        if (result.success) {
-          console.log('✅ Gravação salva:', result.filename);
-          await fetchRecordings();
-          setShowPatientModal(false);
-          setCurrentAudioBlob(null);
-        } else {
-          alert('Erro ao salvar: ' + result.message);
-        }
-      };
-      reader.readAsDataURL(currentAudioBlob);
-    } catch (error) {
-      console.error('Erro ao salvar gravação:', error);
-      alert('Erro ao salvar gravação: ' + error.message);
+  } else {
+    // Gravação tradicional (fallback)
+    setCurrentAudioBlob(recordingData);
+    setShowPatientModal(true);
+  }
+};
+
+const saveRecordingWithPatientName = async (patientName = '') => {
+  try {
+    if (currentRecordingData && currentRecordingData.session_id) {
+      // Finalizar gravação por chunks
+      const response = await fetch('/api/finalize_recording', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          session_id: currentRecordingData.session_id,
+          patient_name: patientName,
+          final_filename: currentRecordingData.final_filename
+        })
+      });
+      
+      const result = await response.json();
+      if (result.success) {
+        console.log('✅ Gravação finalizada:', result.filename);
+        await fetchRecordings();
+        setShowPatientModal(false);
+        setCurrentRecordingData(null);
+      } else {
+        alert('Erro ao finalizar: ' + result.message);
+      }
+    } else if (currentAudioBlob) {
+      // Gravação tradicional (fallback)
+      // ... código existente ...
     }
-  };
+  } catch (error) {
+    console.error('Erro ao salvar gravação:', error);
+    alert('Erro ao salvar gravação: ' + error.message);
+  }
+};
   
   // ===== HANDLERS DE ARQUIVO =====
   

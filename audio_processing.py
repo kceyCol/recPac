@@ -1272,6 +1272,202 @@ def api_export_summary_docx(filename):
             'message': f'Erro interno ao exportar DOCX: {str(e)}'
         }), 500
 
+@audio_bp.route('/api/save_chunk', methods=['POST'])
+@login_required
+def api_save_chunk():
+    """Salva chunk de gravação e monta arquivo final quando completo"""
+    try:
+        data = request.json
+        session_id = data.get('session_id')
+        chunk_index = data.get('chunk_index')
+        audio_data = data.get('audio')
+        is_last = data.get('is_last', False)
+        mime_type = data.get('mime_type', 'audio/webm')
+        
+        if not all([session_id, audio_data is not None, chunk_index is not None]):
+            return jsonify({
+                'success': False,
+                'message': 'Dados incompletos para o chunk'
+            }), 400
+        
+        user_id = session.get('user_id', 'unknown')
+        
+        # Decodificar base64
+        if audio_data.startswith('data:audio'):
+            audio_data = audio_data.split(',', 1)[1]
+        
+        try:
+            audio_bytes = base64.b64decode(audio_data)
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'message': 'Erro ao decodificar chunk de áudio'
+            }), 400
+        
+        # Criar diretório temporário para chunks
+        temp_dir = os.path.join(RECORDINGS_DIR, 'temp_chunks')
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        # Salvar chunk temporário
+        chunk_filename = f"{session_id}_chunk_{chunk_index:03d}.tmp"
+        chunk_path = os.path.join(temp_dir, chunk_filename)
+        
+        with open(chunk_path, 'wb') as f:
+            f.write(audio_bytes)
+        
+        print(f"✅ Chunk {chunk_index} salvo: {len(audio_bytes)} bytes")
+        
+        # Se é o último chunk, montar arquivo final
+        if is_last:
+            final_filename = assemble_chunks(session_id, user_id, chunk_index + 1)
+            return jsonify({
+                'success': True,
+                'message': f'Gravação completa! {chunk_index + 1} chunks processados.',
+                'final_filename': final_filename
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'message': f'Chunk {chunk_index} recebido com sucesso'
+            })
+        
+    except Exception as e:
+        print(f"❌ Erro ao processar chunk: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Erro ao processar chunk: {str(e)}'
+        }), 500
+
+def assemble_chunks(session_id, user_id, total_chunks):
+    """Monta chunks em arquivo final"""
+    try:
+        temp_dir = os.path.join(RECORDINGS_DIR, 'temp_chunks')
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        final_filename = f"recording_{timestamp}_{user_id}.wav"
+        final_path = os.path.join(RECORDINGS_DIR, final_filename)
+        
+        # Lista para armazenar todos os segmentos de áudio
+        audio_segments = []
+        
+        print(f"🔧 Montando {total_chunks} chunks para sessão {session_id}")
+        
+        # Carregar e processar cada chunk
+        for i in range(total_chunks):
+            chunk_filename = f"{session_id}_chunk_{i:03d}.tmp"
+            chunk_path = os.path.join(temp_dir, chunk_filename)
+            
+            if os.path.exists(chunk_path):
+                try:
+                    # Carregar chunk com pydub
+                    chunk_segment = AudioSegment.from_file(chunk_path)
+                    audio_segments.append(chunk_segment)
+                    print(f"✅ Chunk {i} carregado: {len(chunk_segment)}ms")
+                except Exception as e:
+                    print(f"⚠️ Erro ao carregar chunk {i}: {e}")
+                    # Tentar carregar como bytes brutos
+                    with open(chunk_path, 'rb') as f:
+                        chunk_bytes = f.read()
+                    chunk_segment = AudioSegment.from_file(io.BytesIO(chunk_bytes))
+                    audio_segments.append(chunk_segment)
+            else:
+                print(f"❌ Chunk {i} não encontrado: {chunk_path}")
+        
+        if not audio_segments:
+            raise Exception("Nenhum chunk válido encontrado")
+        
+        # Concatenar todos os segmentos
+        print(f"🔗 Concatenando {len(audio_segments)} segmentos...")
+        final_audio = audio_segments[0]
+        for segment in audio_segments[1:]:
+            final_audio += segment
+        
+        # Processar áudio final
+        final_audio = final_audio.set_channels(1)  # Mono
+        final_audio = final_audio.set_frame_rate(16000)  # 16kHz
+        final_audio = final_audio.normalize()  # Normalizar
+        
+        # Exportar arquivo final
+        final_audio.export(
+            final_path,
+            format="wav",
+            parameters=["-acodec", "pcm_s16le"]
+        )
+        
+        file_size = os.path.getsize(final_path)
+        duration = len(final_audio) / 1000  # duração em segundos
+        
+        print(f"✅ Arquivo final criado: {final_filename}")
+        print(f"📊 Tamanho: {file_size} bytes, Duração: {duration:.1f}s")
+        
+        # Limpar chunks temporários
+        cleanup_temp_chunks(session_id, total_chunks, temp_dir)
+        
+        return final_filename
+        
+    except Exception as e:
+        print(f"❌ Erro ao montar chunks: {e}")
+        raise
+
+def cleanup_temp_chunks(session_id, total_chunks, temp_dir):
+    """Remove chunks temporários após montagem"""
+    try:
+        for i in range(total_chunks):
+            chunk_filename = f"{session_id}_chunk_{i:03d}.tmp"
+            chunk_path = os.path.join(temp_dir, chunk_filename)
+            if os.path.exists(chunk_path):
+                os.remove(chunk_path)
+        print(f"🧹 Chunks temporários removidos para sessão {session_id}")
+    except Exception as e:
+        print(f"⚠️ Erro ao limpar chunks temporários: {e}")
+
+@audio_bp.route('/api/finalize_recording', methods=['POST'])
+@login_required
+def api_finalize_recording():
+    """Finaliza gravação adicionando nome do paciente"""
+    try:
+        data = request.json
+        session_id = data.get('session_id')
+        patient_name = data.get('patient_name', '')
+        current_filename = data.get('final_filename')
+        
+        if not current_filename:
+            return jsonify({
+                'success': False,
+                'message': 'Nome do arquivo não fornecido'
+            }), 400
+        
+        # Se há nome do paciente, renomear arquivo
+        if patient_name:
+            user_id = session.get('user_id', 'unknown')
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            safe_patient_name = sanitize_filename(patient_name)
+            new_filename = f"{safe_patient_name}_{timestamp}_{user_id}.wav"
+            
+            current_path = os.path.join(RECORDINGS_DIR, current_filename)
+            new_path = os.path.join(RECORDINGS_DIR, new_filename)
+            
+            if os.path.exists(current_path):
+                os.rename(current_path, new_path)
+                print(f"📝 Arquivo renomeado: {current_filename} -> {new_filename}")
+                final_filename = new_filename
+            else:
+                final_filename = current_filename
+        else:
+            final_filename = current_filename
+        
+        return jsonify({
+            'success': True,
+            'message': 'Gravação finalizada com sucesso!',
+            'filename': final_filename
+        })
+        
+    except Exception as e:
+        print(f"❌ Erro ao finalizar gravação: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Erro ao finalizar gravação: {str(e)}'
+        }), 500
+
 @audio_bp.route('/api/debug_files/<filename>', methods=['GET'])
 @login_required
 def debug_files(filename):

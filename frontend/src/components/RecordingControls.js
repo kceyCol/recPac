@@ -5,6 +5,8 @@ const RecordingControls = ({ onRecordingComplete }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [audioLevel, setAudioLevel] = useState(0);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
   
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -12,6 +14,11 @@ const RecordingControls = ({ onRecordingComplete }) => {
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
   const animationRef = useRef(null);
+  const recordingSessionId = useRef(null);
+
+  // Configurações para chunks
+  const CHUNK_DURATION = 30000; // 30 segundos por chunk
+  const MAX_CHUNK_SIZE = 5 * 1024 * 1024; // 5MB máximo por chunk
 
   const startRecording = async () => {
     try {
@@ -23,6 +30,9 @@ const RecordingControls = ({ onRecordingComplete }) => {
           sampleRate: 44100
         } 
       });
+
+      // Gerar ID único para esta sessão de gravação
+      recordingSessionId.current = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
       // Configurar visualização de áudio
       audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
@@ -44,37 +54,40 @@ const RecordingControls = ({ onRecordingComplete }) => {
       };
       updateAudioLevel();
       
-      // Configurar MediaRecorder com formato nativo
-      let options = { audioBitsPerSecond: 128000 };
+      // Configurar MediaRecorder com chunks automáticos
+      let options = { 
+        audioBitsPerSecond: 128000
+      };
       
-      // Usar formato suportado pelo navegador
       if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
         options.mimeType = 'audio/webm;codecs=opus';
       } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
         options.mimeType = 'audio/mp4';
-      } else if (MediaRecorder.isTypeSupported('audio/wav')) {
-        options.mimeType = 'audio/wav';
       }
 
       mediaRecorderRef.current = new MediaRecorder(stream, options);
       audioChunksRef.current = [];
+      let chunkIndex = 0;
 
-      mediaRecorderRef.current.ondataavailable = (event) => {
+      mediaRecorderRef.current.ondataavailable = async (event) => {
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data);
+          
+          // Se o chunk ficou muito grande, enviar automaticamente
+          const currentSize = audioChunksRef.current.reduce((total, chunk) => total + chunk.size, 0);
+          if (currentSize > MAX_CHUNK_SIZE) {
+            await sendChunk(chunkIndex);
+            chunkIndex++;
+            audioChunksRef.current = [];
+          }
         }
       };
 
-      mediaRecorderRef.current.onstop = () => {
-        // Criar blob com tipo original do MediaRecorder
-        const audioBlob = new Blob(audioChunksRef.current, { 
-          type: mediaRecorderRef.current.mimeType 
-        });
-        
-        console.log(`📹 Gravação finalizada: ${audioBlob.size} bytes, tipo: ${audioBlob.type}`);
-        
-        // Enviar áudio original sem processamento
-        onRecordingComplete(audioBlob);
+      mediaRecorderRef.current.onstop = async () => {
+        // Enviar último chunk se houver dados
+        if (audioChunksRef.current.length > 0) {
+          await sendChunk(chunkIndex, true); // true = último chunk
+        }
         
         // Limpar recursos
         stream.getTracks().forEach(track => track.stop());
@@ -86,7 +99,8 @@ const RecordingControls = ({ onRecordingComplete }) => {
         }
       };
 
-      mediaRecorderRef.current.start(1000);
+      // Iniciar gravação com chunks de 30 segundos
+      mediaRecorderRef.current.start(CHUNK_DURATION);
       setIsRecording(true);
       
       timerRef.current = setInterval(() => {
@@ -96,6 +110,64 @@ const RecordingControls = ({ onRecordingComplete }) => {
     } catch (error) {
       console.error('❌ Erro ao iniciar gravação:', error);
       alert('Erro ao acessar o microfone. Verifique as permissões.');
+    }
+  };
+
+  const sendChunk = async (chunkIndex, isLast = false) => {
+    if (audioChunksRef.current.length === 0) return;
+
+    try {
+      setIsUploading(true);
+      
+      const chunkBlob = new Blob(audioChunksRef.current, { 
+        type: mediaRecorderRef.current.mimeType 
+      });
+      
+      console.log(`📤 Enviando chunk ${chunkIndex}: ${chunkBlob.size} bytes`);
+      
+      const reader = new FileReader();
+      reader.onloadend = async function() {
+        const base64Audio = reader.result;
+        
+        const response = await fetch('/api/save_chunk', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include',
+          body: JSON.stringify({
+            session_id: recordingSessionId.current,
+            chunk_index: chunkIndex,
+            audio: base64Audio,
+            is_last: isLast,
+            mime_type: mediaRecorderRef.current.mimeType
+          })
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+          console.log(`✅ Chunk ${chunkIndex} enviado com sucesso`);
+          
+          if (isLast) {
+            // Finalizar gravação e solicitar nome do paciente
+            setIsUploading(false);
+            onRecordingComplete({
+              session_id: recordingSessionId.current,
+              total_chunks: chunkIndex + 1,
+              final_filename: result.final_filename
+            });
+          }
+        } else {
+          throw new Error(result.message);
+        }
+      };
+      
+      reader.readAsDataURL(chunkBlob);
+      
+    } catch (error) {
+      console.error(`❌ Erro ao enviar chunk ${chunkIndex}:`, error);
+      setIsUploading(false);
+      alert(`Erro ao enviar parte da gravação: ${error.message}`);
     }
   };
 
@@ -115,15 +187,10 @@ const RecordingControls = ({ onRecordingComplete }) => {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (animationRef.current) cancelAnimationFrame(animationRef.current);
       if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
         audioContextRef.current.close();
       }
@@ -138,13 +205,13 @@ const RecordingControls = ({ onRecordingComplete }) => {
       </h2>
       
       <p className="text-gray-600 mb-4">
-        Clique em "Iniciar" para começar a gravar. O áudio será processado automaticamente no seu navegador.
+        Sistema otimizado para gravações longas. O áudio é enviado automaticamente em pequenos pedaços.
       </p>
       
       <div className="flex space-x-4 mb-4">
         <button
           onClick={startRecording}
-          disabled={isRecording}
+          disabled={isRecording || isUploading}
           className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <MicrophoneIcon className="h-5 w-5 mr-2" />
@@ -153,7 +220,7 @@ const RecordingControls = ({ onRecordingComplete }) => {
         
         <button
           onClick={stopRecording}
-          disabled={!isRecording}
+          disabled={!isRecording || isUploading}
           className="flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <StopIcon className="h-5 w-5 mr-2" />
@@ -161,22 +228,33 @@ const RecordingControls = ({ onRecordingComplete }) => {
         </button>
       </div>
       
-      {isRecording && (
+      {(isRecording || isUploading) && (
         <div className="space-y-3">
           <div className="flex items-center space-x-3">
             <span className="text-sm font-medium">Tempo:</span>
             <span className="text-lg font-mono">{formatTime(recordingTime)}</span>
           </div>
           
-          <div className="flex items-center space-x-3">
-            <span className="text-sm font-medium">Nível:</span>
-            <div className="flex-1 bg-gray-200 rounded-full h-2">
-              <div 
-                className="bg-green-500 h-2 rounded-full transition-all duration-100"
-                style={{ width: `${Math.min(audioLevel, 100)}%` }}
-              />
+          {isRecording && (
+            <div className="flex items-center space-x-3">
+              <span className="text-sm font-medium">Nível:</span>
+              <div className="flex-1 bg-gray-200 rounded-full h-2">
+                <div 
+                  className="bg-green-500 h-2 rounded-full transition-all duration-100"
+                  style={{ width: `${Math.min(audioLevel, 100)}%` }}
+                />
+              </div>
             </div>
-          </div>
+          )}
+          
+          {isUploading && (
+            <div className="flex items-center space-x-3">
+              <span className="text-sm font-medium">Enviando:</span>
+              <div className="flex-1 bg-gray-200 rounded-full h-2">
+                <div className="bg-blue-500 h-2 rounded-full animate-pulse" style={{ width: '100%' }} />
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
