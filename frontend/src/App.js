@@ -4,6 +4,7 @@ import Login from './components/Login';
 import Register from './components/Register';
 import Dashboard from './components/Dashboard';
 import Transcriptions from './components/Transcriptions';
+import Settings from './components/Settings';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import './App.css';
 import ViewTranscription from './components/ViewTranscription';
@@ -20,6 +21,7 @@ function App() {
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/transcriptions" element={<ProtectedRoute><Transcriptions /></ProtectedRoute>} />
             <Route path="/transcription/:filename" element={<ProtectedRoute><ViewTranscription /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
           </Routes>
         </div>
       </Router>

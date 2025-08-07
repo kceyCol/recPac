@@ -13,14 +13,30 @@ const ViewTranscription = () => {
   const [geminiResponse, setGeminiResponse] = useState('');
   const [hasChanges, setHasChanges] = useState(false);
   
-  // Estado para o prompt personalizado - inicializado vazio
+  // Estado para o prompt personalizado
   const [customPrompt, setCustomPrompt] = useState('');
   
-  // NOVO: Estado para o sistema de log
+  // Estados para prompts personalizados
+  const [customPrompts, setCustomPrompts] = useState({
+    prompt1: '',
+    prompt2: '',
+    prompt3: '',
+    prompt4: '',
+    prompt5: ''
+  });
+  const [promptLabels, setPromptLabels] = useState({
+    label1: 'Prompt 1',
+    label2: 'Prompt 2',
+    label3: 'Prompt 3', 
+    label4: 'Prompt 4',
+    label5: 'Prompt 5'
+  });
+  
+  // Estado para o sistema de log
   const [logs, setLogs] = useState([]);
   const [showLogs, setShowLogs] = useState(false);
 
-  // NOVO: Função para adicionar log
+  // Função para adicionar log
   const addLog = (message, type = 'info') => {
     const timestamp = new Date().toLocaleTimeString();
     const newLog = {
@@ -33,10 +49,33 @@ const ViewTranscription = () => {
     setShowLogs(true);
   };
 
-  // NOVO: Função para limpar logs
+  // Função para limpar logs
   const clearLogs = () => {
     setLogs([]);
     setShowLogs(false);
+  };
+
+  // Carregar prompts personalizados
+  useEffect(() => {
+    const savedPrompts = localStorage.getItem('customPrompts');
+    const savedLabels = localStorage.getItem('promptLabels');
+    
+    if (savedPrompts) {
+      setCustomPrompts(JSON.parse(savedPrompts));
+    }
+    
+    if (savedLabels) {
+      setPromptLabels(JSON.parse(savedLabels));
+    }
+  }, []);
+
+  // Função para aplicar prompt personalizado
+  const applyCustomPrompt = (promptKey) => {
+    const prompt = customPrompts[promptKey];
+    if (prompt.trim()) {
+      setCustomPrompt(prompt);
+      addLog(`Prompt "${promptLabels[promptKey.replace('prompt', 'label')]}" aplicado`);
+    }
   };
 
   useEffect(() => {
@@ -78,10 +117,24 @@ const ViewTranscription = () => {
     }
   };
 
-  // NOVO: Função para buscar o prompt padrão
+  // Função para buscar o prompt padrão
   const fetchDefaultPrompt = async () => {
     try {
-      addLog('Carregando prompt padrão...');
+      addLog('Carregando prompt personalizado...');
+      
+      // Carregar o primeiro prompt personalizado do localStorage
+      const savedPrompts = localStorage.getItem('customPrompts');
+      
+      if (savedPrompts) {
+        const prompts = JSON.parse(savedPrompts);
+        if (prompts.prompt1 && prompts.prompt1.trim()) {
+          setCustomPrompt(prompts.prompt1);
+          addLog('Prompt personalizado (Farmacologia Clínica) carregado!', 'success');
+          return;
+        }
+      }
+      
+      // Fallback para o prompt padrão se não houver prompt personalizado
       const response = await fetch('/api/default_prompt', {
         credentials: 'include'
       });
@@ -337,6 +390,13 @@ const ViewTranscription = () => {
             </div>
             <div className="flex items-center space-x-4">
               <span className="text-gray-600">Olá, {user?.name}</span>
+              <Link
+                to="/settings"
+                className="p-2 text-gray-500 hover:text-gray-700 transition-colors"
+                title="Configurações"
+              >
+                ⚙️
+              </Link>
               <button
                 onClick={logout}
                 className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md transition-colors"
@@ -403,6 +463,32 @@ const ViewTranscription = () => {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Prompt Personalizado:
               </label>
+              
+              {/* Botões de prompts personalizados */}
+              <div className="mb-3 flex flex-wrap gap-2">
+                {[1, 2, 3, 4, 5].map(num => {
+                  const promptKey = `prompt${num}`;
+                  const labelKey = `label${num}`;
+                  const hasPrompt = customPrompts[promptKey]?.trim();
+                  
+                  return (
+                    <button
+                      key={num}
+                      onClick={() => applyCustomPrompt(promptKey)}
+                      disabled={!hasPrompt}
+                      className={`px-3 py-1 rounded-md text-xs transition-colors ${
+                        hasPrompt
+                          ? 'bg-purple-100 hover:bg-purple-200 text-purple-700 border border-purple-300'
+                          : 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
+                        }`}
+                      title={hasPrompt ? customPrompts[promptKey] : 'Prompt não configurado'}
+                    >
+                      {promptLabels[labelKey] || `Prompt ${num}`}
+                    </button>
+                  );
+                })}
+              </div>
+              
               <textarea
                 value={customPrompt}
                 onChange={(e) => setCustomPrompt(e.target.value)}
@@ -467,7 +553,7 @@ const ViewTranscription = () => {
         </div>
       </main>
 
-      {/* NOVO: Sistema de Log movido para o final da página com fundo azul claro */}
+      {/* Sistema de Log */}
       {showLogs && (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -517,7 +603,7 @@ const ViewTranscription = () => {
         </div>
       )}
 
-      {/* Botão para mostrar logs quando minimizado - também movido para baixo */}
+      {/* Botão para mostrar logs quando minimizado */}
       {!showLogs && logs.length > 0 && (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
           <button
@@ -530,6 +616,6 @@ const ViewTranscription = () => {
       )}
     </div>
   );
-}
+};
 
 export default ViewTranscription;
