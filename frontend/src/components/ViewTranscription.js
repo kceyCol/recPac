@@ -25,11 +25,11 @@ const ViewTranscription = () => {
     prompt5: ''
   });
   const [promptLabels, setPromptLabels] = useState({
-    label1: 'Prompt 1',
-    label2: 'Prompt 2',
-    label3: 'Prompt 3', 
-    label4: 'Prompt 4',
-    label5: 'Prompt 5'
+    label1: '🧠 Farmacologia Clínica',
+    label2: '📋 Diagnóstico Diferencial', 
+    label3: '🔬 Análise de artigos científicos',
+    label4: '📖 Resumo de guidline clínico',
+    label5: '🩺 PICO'
   });
   
   // Estado para o sistema de log
@@ -62,10 +62,32 @@ const ViewTranscription = () => {
     
     if (savedPrompts) {
       setCustomPrompts(JSON.parse(savedPrompts));
+    } else {
+      // Configurar prompts padrão se não existirem
+      const defaultPrompts = {
+        prompt1: 'Atue como um farmacologista clínico experiente. Com base na lista de medicamentos de um paciente e seu contexto clínico (idade, comorbidades, função renal/hepática), realize uma análise farmacoterapêutica completa e estruturada.',
+        prompt2: 'Analise esta consulta médica e forneça um resumo estruturado com: 1) Queixa principal, 2) História da doença atual, 3) Exame físico, 4) Hipóteses diagnósticas, 5) Conduta proposta.',
+        prompt3: 'Extraia desta transcrição médica todos os sintomas, sinais clínicos, medicamentos mencionados e organize em formato de prontuário médico.',
+        prompt4: 'Identifique nesta consulta os principais pontos para seguimento do paciente, incluindo retornos, exames solicitados e orientações dadas.',
+        prompt5: 'Crie um relatório médico formal baseado nesta transcrição, adequado para encaminhamentos e documentação hospitalar.'
+      };
+      setCustomPrompts(defaultPrompts);
+      localStorage.setItem('customPrompts', JSON.stringify(defaultPrompts));
     }
     
     if (savedLabels) {
       setPromptLabels(JSON.parse(savedLabels));
+    } else {
+      // Configurar labels padrão se não existirem
+      const defaultLabels = {
+        label1: '🧠 Farmacologia Clínica',
+        label2: '📋 Diagnóstico Diferencial',
+        label3: '🔬 Análise de artigos científicos', 
+        label4: '📖 Resumo de guidline clínico',
+        label5: '🩺 PICO'
+      };
+      setPromptLabels(defaultLabels);
+      localStorage.setItem('promptLabels', JSON.stringify(defaultLabels));
     }
   }, []);
 
