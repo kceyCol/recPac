@@ -129,36 +129,49 @@ const RecordingControls = ({ onRecordingComplete }) => {
       reader.onloadend = async function() {
         const base64Audio = reader.result;
         
-        const response = await fetch('/api/save_chunk', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-          body: JSON.stringify({
-            session_id: recordingSessionId.current,
-            chunk_index: chunkIndex,
-            audio: base64Audio,
-            is_last: isLast,
-            mime_type: mediaRecorderRef.current.mimeType
-          })
-        });
+        // Adicionar timeout de 30 segundos
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
         
-        const result = await response.json();
-        if (result.success) {
-          console.log(`✅ Chunk ${chunkIndex} enviado com sucesso`);
-          
-          if (isLast) {
-            // Finalizar gravação e solicitar nome do paciente
-            setIsUploading(false);
-            onRecordingComplete({
+        try {
+          const response = await fetch('/api/save_chunk', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            credentials: 'include',
+            signal: controller.signal,
+            body: JSON.stringify({
               session_id: recordingSessionId.current,
-              total_chunks: chunkIndex + 1,
-              final_filename: result.final_filename
-            });
+              chunk_index: chunkIndex,
+              audio: base64Audio,
+              is_last: isLast,
+              mime_type: mediaRecorderRef.current.mimeType
+            })
+          });
+          
+          clearTimeout(timeoutId);
+          
+          const result = await response.json();
+          if (result.success) {
+            console.log(`✅ Chunk ${chunkIndex} enviado com sucesso`);
+            
+            if (isLast) {
+              setIsUploading(false);
+              onRecordingComplete({
+                session_id: recordingSessionId.current,
+                total_chunks: chunkIndex + 1,
+                final_filename: result.final_filename
+              });
+            } else {
+              setIsUploading(false);
+            }
+          } else {
+            throw new Error(result.message);
           }
-        } else {
-          throw new Error(result.message);
+        } catch (fetchError) {
+          clearTimeout(timeoutId);
+          throw fetchError;
         }
       };
       
@@ -167,17 +180,33 @@ const RecordingControls = ({ onRecordingComplete }) => {
     } catch (error) {
       console.error(`❌ Erro ao enviar chunk ${chunkIndex}:`, error);
       setIsUploading(false);
-      alert(`Erro ao enviar parte da gravação: ${error.message}`);
+      
+      if (error.name === 'AbortError') {
+        alert('Timeout no envio do chunk. Tente novamente.');
+      } else {
+        alert(`Erro ao enviar parte da gravação: ${error.message}`);
+      }
     }
   };
 
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
+      console.log('🛑 Parando gravação...');
+      
+      // Parar gravação imediatamente
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       setRecordingTime(0);
       setAudioLevel(0);
       clearInterval(timerRef.current);
+      
+      // Limpar recursos imediatamente
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        audioContextRef.current.close();
+      }
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
     }
   };
 
@@ -220,7 +249,7 @@ const RecordingControls = ({ onRecordingComplete }) => {
         
         <button
           onClick={stopRecording}
-          disabled={!isRecording || isUploading}
+          disabled={!isRecording}
           className="flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <StopIcon className="h-5 w-5 mr-2" />
