@@ -121,205 +121,19 @@ def load_default_prompt():
 
 Organize as informações em tópicos claros, solicito uma análise detalhada, estruturada e prática, que possa servir de base para a tomada de decisão clínica."""
 
-# Função para transcrever áudio
+# Função para transcrever áudio - usando a implementação do audio_processing.py
 def transcribe_audio_with_speech_recognition(audio_path):
-    """Transcreve áudio usando uma abordagem mais robusta"""
+    """Transcreve áudio usando a implementação robusta do audio_processing.py"""
     try:
-        print(f"🔍 Iniciando transcrição de: {audio_path}")
-        
-        # Verificar se o arquivo existe
-        if not os.path.exists(audio_path):
-            return "[Erro: Arquivo de áudio não encontrado]"
-        
-        # Verificar tamanho do arquivo
-        file_size = os.path.getsize(audio_path)
-        print(f"📊 Tamanho do arquivo: {file_size} bytes")
-        
-        if file_size < 1000:  # Arquivo muito pequeno
-            return "[Erro: Arquivo de áudio muito pequeno ou vazio]"
-        
-        recognizer = sr.Recognizer()
-        
-        # Configurações mais robustas para timeout
-        recognizer.energy_threshold = 4000
-        recognizer.dynamic_energy_threshold = False
-        recognizer.pause_threshold = 0.8
-        recognizer.operation_timeout = 30  # Aumentado de 10 para 30 segundos
-        
-        print("📁 Processando arquivo de áudio...")
-        
-        # Estratégia: Converter para um formato muito básico
-        try:
-            # Carregar com pydub
-            print("🔧 Carregando arquivo com pydub...")
-            audio = AudioSegment.from_file(audio_path)
-            
-            print(f"📊 Propriedades originais: {audio.frame_rate}Hz, {audio.channels} canais, {audio.sample_width*8}bit")
-            
-            # Verificar duração do áudio
-            duration_seconds = len(audio) / 1000.0
-            print(f"⏱️ Duração do áudio: {duration_seconds:.2f} segundos")
-            
-            if duration_seconds < 0.5:
-                return "[Erro: Áudio muito curto para transcrição]"
-            
-            # Se o áudio for muito longo, usar segmentação
-            if duration_seconds > 60:  # Mais de 1 minuto
-                print("📝 Áudio longo detectado, usando segmentação...")
-                return transcribe_long_audio_in_segments(audio, audio_path)
-            
-            # Normalizar áudio para melhor reconhecimento
-            print("🔧 Normalizando áudio...")
-            
-            # Converter para mono se necessário
-            if audio.channels > 1:
-                audio = audio.set_channels(1)
-                print("🔄 Convertido para mono")
-            
-            # Ajustar sample rate para 16kHz (padrão para reconhecimento)
-            if audio.frame_rate != 16000:
-                audio = audio.set_frame_rate(16000)
-                print(f"🔄 Sample rate ajustado para 16kHz")
-            
-            # Normalizar volume
-            audio = audio.normalize()
-            print("🔊 Volume normalizado")
-            
-            # Aplicar filtro de ruído básico
-            # Remover frequências muito baixas e muito altas
-            audio = audio.high_pass_filter(80)  # Remove ruído de baixa frequência
-            audio = audio.low_pass_filter(8000)  # Remove ruído de alta frequência
-            print("🎛️ Filtros de ruído aplicados")
-            
-            # Criar arquivo temporário com áudio processado
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-                temp_path = temp_file.name
-                audio.export(temp_path, format="wav")
-                print(f"💾 Áudio processado salvo temporariamente: {temp_path}")
-            
-            # Tentar transcrição com diferentes configurações
-            transcription_attempts = [
-                {"language": "pt-BR", "show_all": False},
-                {"language": "pt-PT", "show_all": False},
-                {"language": "en-US", "show_all": False},
-                {"language": None, "show_all": True}  # Última tentativa com show_all
-            ]
-            
-            for i, config in enumerate(transcription_attempts, 1):
-                try:
-                    print(f"🎯 Tentativa {i}: idioma={config['language']}, show_all={config['show_all']}")
-                    
-                    with sr.AudioFile(temp_path) as source:
-                        # Ajustar para ruído ambiente
-                        recognizer.adjust_for_ambient_noise(source, duration=0.5)
-                        print("🎚️ Ajustado para ruído ambiente")
-                        
-                        # Gravar áudio
-                        audio_data = recognizer.record(source)
-                        print("📼 Áudio gravado para reconhecimento")
-                    
-                    # Tentar reconhecimento
-                    if config["show_all"]:
-                        # Última tentativa - mostrar todas as alternativas
-                        result = recognizer.recognize_google(audio_data, language=config["language"], show_all=True)
-                        if result and isinstance(result, dict) and 'alternative' in result:
-                            transcription = result['alternative'][0]['transcript']
-                            confidence = result['alternative'][0].get('confidence', 0)
-                            print(f"✅ Transcrição obtida com confiança: {confidence:.2f}")
-                            return transcription
-                    else:
-                        transcription = recognizer.recognize_google(audio_data, language=config["language"])
-                        if transcription and transcription.strip():
-                            print(f"✅ Transcrição obtida: {transcription[:50]}...")
-                            return transcription
-                
-                except sr.UnknownValueError:
-                    print(f"❌ Tentativa {i}: Não foi possível entender o áudio")
-                    continue
-                except sr.RequestError as e:
-                    print(f"❌ Tentativa {i}: Erro na requisição: {e}")
-                    continue
-                except Exception as e:
-                    print(f"❌ Tentativa {i}: Erro inesperado: {e}")
-                    continue
-            
-            # Limpar arquivo temporário
-            try:
-                os.unlink(temp_path)
-            except:
-                pass
-            
-            return "[Erro: Não foi possível transcrever o áudio após múltiplas tentativas]"
-            
-        except Exception as e:
-            print(f"❌ Erro no processamento com pydub: {e}")
-            return f"[Erro no processamento de áudio: {str(e)}]"
-    
+        # Importar a função do módulo audio_processing
+        from audio_processing import transcribe_audio_with_speech_recognition as transcribe_audio
+        return transcribe_audio(audio_path)
+    except ImportError:
+        # Fallback se não conseguir importar
+        return "[Erro: Módulo de transcrição não disponível]"
     except Exception as e:
-        print(f"❌ Erro geral na transcrição: {e}")
+        print(f"❌ Erro na transcrição: {e}")
         return f"[Erro na transcrição: {str(e)}]"
-
-def transcribe_long_audio_in_segments(audio, original_path):
-    """Transcreve áudio longo dividindo em segmentos"""
-    try:
-        print("📝 Iniciando transcrição por segmentos...")
-        
-        segment_length = 30 * 1000  # 30 segundos em millisegundos
-        overlap = 2 * 1000  # 2 segundos de sobreposição
-        
-        transcriptions = []
-        total_duration = len(audio)
-        
-        for start in range(0, total_duration, segment_length - overlap):
-            end = min(start + segment_length, total_duration)
-            
-            print(f"🎯 Processando segmento {start//1000}s - {end//1000}s")
-            
-            # Extrair segmento
-            segment = audio[start:end]
-            
-            # Criar arquivo temporário para o segmento
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-                temp_path = temp_file.name
-                segment.export(temp_path, format="wav")
-            
-            try:
-                recognizer = sr.Recognizer()
-                recognizer.energy_threshold = 4000
-                recognizer.dynamic_energy_threshold = False
-                
-                with sr.AudioFile(temp_path) as source:
-                    recognizer.adjust_for_ambient_noise(source, duration=0.5)
-                    audio_data = recognizer.record(source)
-                
-                # Tentar transcrever o segmento
-                try:
-                    segment_text = recognizer.recognize_google(audio_data, language="pt-BR")
-                    if segment_text and segment_text.strip():
-                        transcriptions.append(segment_text)
-                        print(f"✅ Segmento transcrito: {segment_text[:30]}...")
-                except sr.UnknownValueError:
-                    print(f"⚠️ Segmento não compreendido")
-                except sr.RequestError as e:
-                    print(f"❌ Erro na requisição do segmento: {e}")
-            
-            finally:
-                # Limpar arquivo temporário
-                try:
-                    os.unlink(temp_path)
-                except:
-                    pass
-        
-        if transcriptions:
-            full_transcription = " ".join(transcriptions)
-            print(f"✅ Transcrição completa obtida: {len(full_transcription)} caracteres")
-            return full_transcription
-        else:
-            return "[Erro: Não foi possível transcrever nenhum segmento do áudio]"
-    
-    except Exception as e:
-        print(f"❌ Erro na transcrição por segmentos: {e}")
-        return f"[Erro na transcrição por segmentos: {str(e)}]"
 
 def improve_transcription_with_gemini(raw_transcription):
     """Melhora a transcrição usando Gemini"""
@@ -1009,7 +823,12 @@ def finalize_session():
         final_filename = f'Sessao_{session_id}_{timestamp}_{safe_user_id}.wav'
         final_path = os.path.join(RECORDINGS_DIR, final_filename)
         
-        combined_audio.export(final_path, format="wav")
+        # CORREÇÃO: Exportar com configurações específicas para evitar problemas de velocidade
+        combined_audio.export(final_path, format="wav", parameters=[
+            "-acodec", "pcm_s16le",  # PCM 16-bit
+            "-ar", "44100",  # Sample rate padrão
+            "-ac", "1"  # Mono
+        ])
         
         return jsonify({
             'success': True,

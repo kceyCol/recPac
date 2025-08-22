@@ -1,0 +1,17 @@
+# Configurações para RecPac - Use estas variáveis no Render
+
+# Flask
+FLASK_SECRET_KEY=sua_chave_secreta_super_forte_aqui
+FLASK_ENV=production
+FLASK_DEBUG=0
+
+# Google Gemini AI (opcional - para resumos)
+GEMINI_API_KEY=sua_chave_do_gemini_aqui
+
+# Configurações de áudio
+MAX_FILE_SIZE=104857600
+AUDIO_QUALITY=high
+
+# Diretórios (automático em produção)
+RECORDINGS_DIR=recordings
+TRANSCRIPTIONS_DIR=transcriptions

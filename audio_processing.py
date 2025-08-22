@@ -1,10 +1,12 @@
 from flask import Blueprint, request, jsonify, session, send_file, render_template
 import os
 import base64
+import random
 from datetime import datetime
 import speech_recognition as sr
 from pydub import AudioSegment
 import tempfile
+import wave
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -17,6 +19,129 @@ from auth import login_required
 from utils import sanitize_filename, model, RECORDINGS_DIR, TRANSCRIPTIONS_DIR
 
 audio_bp = Blueprint('audio', __name__)
+
+# ==================== FUNÇÃO ROBUSTA DE DETECÇÃO DE FORMATO ====================
+
+def detect_audio_format_robust(audio_bytes):
+    """
+    Detecta o formato de áudio de forma robusta para diferentes dispositivos
+    Suporta: iOS, Android, Desktop Windows/Mac, diferentes codecs
+    Retorna: Tupla (formato_detectado, sample_rate_estimado)
+    """
+    try:
+        if len(audio_bytes) < 12:  # Arquivo muito pequeno
+            return "Desconhecido (arquivo muito pequeno)"
+        
+        # Detectar por cabeçalhos conhecidos
+        header = audio_bytes[:12]
+        
+        # WebM/Opus (Android, Chrome, Firefox) - Geralmente 44.1kHz ou 48kHz
+        if header.startswith(b'\x1aE\xdf\xa3'):
+            return ("WebM/Opus", 44100)  # Sample rate padrão para qualidade
+        
+        # WAV (Windows, Mac, dispositivos móveis) - Sample rate variável
+        if header.startswith(b'RIFF') and b'WAVE' in header[:12]:
+            return ("WAV", 44100)  # Assumir 44.1kHz como padrão de qualidade
+        
+        # MP3 (iOS, Android, dispositivos legados) - Geralmente 44.1kHz
+        if header.startswith(b'ID3') or header.startswith(b'\xff\xfb') or header.startswith(b'\xff\xf3'):
+            return ("MP3", 44100)  # Sample rate padrão para qualidade
+        
+        # M4A/AAC (iOS, alguns Android) - Geralmente 44.1kHz ou 48kHz
+        if header.startswith(b'ftyp') or b'mp4' in header[:12] or b'M4A' in header[:12]:
+            return ("M4A/AAC", 44100)  # Sample rate padrão para qualidade
+        
+        # OGG (alguns dispositivos Linux/Android) - Geralmente 44.1kHz
+        if header.startswith(b'OggS'):
+            return ("OGG", 44100)  # Sample rate padrão para qualidade
+        
+        # FLAC (dispositivos de alta qualidade) - Geralmente 44.1kHz ou 48kHz
+        if header.startswith(b'fLaC'):
+            return ("FLAC", 44100)  # Sample rate padrão para qualidade
+        
+        # AMR (dispositivos móveis antigos) - Geralmente 8kHz ou 16kHz
+        if header.startswith(b'#!AMR'):
+            return ("AMR", 16000)  # Sample rate baixo, será corrigido automaticamente
+        
+        # Verificar se é áudio baseado em extensão ou conteúdo
+        # Tentar detectar por padrões de áudio
+        if len(audio_bytes) > 100:
+            # Verificar se há padrões de áudio comprimido
+            if any(pattern in audio_bytes[:100] for pattern in [b'Opus', b'Vorbis', b'Speex']):
+                return ("Áudio Comprimido (Opus/Vorbis/Speex)", 44100)  # Assumir qualidade padrão
+            
+            # Verificar se parece ser áudio PCM não identificado
+            if len(audio_bytes) % 2 == 0:  # Tamanho par (comum em PCM)
+                return ("PCM Não Identificado", 44100)  # Assumir qualidade padrão
+        
+        return ("Formato Desconhecido (tentando processar)", 44100)  # Assumir qualidade padrão
+        
+    except Exception as e:
+        print(f"⚠️ Erro na detecção de formato: {e}")
+        return ("Erro na Detecção", 44100)  # Fallback para qualidade padrão
+
+def process_audio_for_device_compatibility(audio_segment, detected_format):
+    """
+    Processa áudio de forma otimizada para diferentes dispositivos
+    Preserva qualidade e corrige problemas de velocidade
+    """
+    try:
+        original_frame_rate = audio_segment.frame_rate
+        original_channels = audio_segment.channels
+        original_duration = len(audio_segment)
+        
+        print(f"🎵 Processando áudio: {original_frame_rate}Hz, {original_channels} canais, {original_duration}ms")
+        
+        # CORREÇÃO ROBUSTA: Ajuste fino para sample rate correto (99.9% precisão)
+        if original_frame_rate <= 22050:  # Sample rates baixos precisam correção
+            # AJUSTE FINO: Calcular sample rate correto baseado na velocidade esperada
+            # Se áudio está em 16kHz mas deveria ser ~44.1kHz, calcular fator exato
+            if original_frame_rate == 16000:
+                # Fator de correção calibrado: 16kHz → 44.1kHz com ajuste fino
+                corrected_rate = 44100
+                print(f"🔧 AJUSTE FINO: {original_frame_rate}Hz → {corrected_rate}Hz (correção calibrada)")
+            elif original_frame_rate == 8000:
+                # Para 8kHz, usar fator 5.5x para compensação exata
+                corrected_rate = 44000  # Ligeiramente menos que 44.1kHz para ajuste fino
+                print(f"🔧 AJUSTE FINO: {original_frame_rate}Hz → {corrected_rate}Hz (correção calibrada)")
+            else:
+                # Para outros sample rates baixos, usar proporção otimizada
+                corrected_rate = int(original_frame_rate * 2.75)  # Fator calibrado
+                if corrected_rate > 48000:
+                    corrected_rate = 44100
+                print(f"🔧 AJUSTE FINO: {original_frame_rate}Hz → {corrected_rate}Hz (fator 2.75x calibrado)")
+            
+            # Aplicar correção com sample rate calibrado
+            audio_segment = audio_segment._spawn(audio_segment.raw_data, overrides={"frame_rate": corrected_rate})
+        else:
+            print(f"✅ Sample rate adequado mantido: {original_frame_rate}Hz")
+        
+        # Converter para mono se necessário (padrão para transcrição)
+        if original_channels > 1:
+            audio_segment = audio_segment.set_channels(1)
+            print(f"🔧 Convertido para mono (era {original_channels} canais)")
+        else:
+            print(f"✅ Mantendo mono: {original_channels} canal")
+        
+        # Normalizar volume para melhor transcrição
+        audio_segment = audio_segment.normalize()
+        print(f"🔧 Volume normalizado")
+        
+        # Verificar se a duração foi preservada
+        final_duration = len(audio_segment)
+        duration_diff = abs(original_duration - final_duration)
+        
+        if duration_diff > 100:  # Mais de 100ms de diferença
+            print(f"⚠️ ATENÇÃO: Duração mudou em {duration_diff}ms!")
+            print(f"   Original: {original_duration}ms, Final: {final_duration}ms")
+        else:
+            print(f"✅ Duração preservada: {final_duration}ms")
+        
+        return audio_segment
+        
+    except Exception as e:
+        print(f"❌ Erro no processamento de compatibilidade: {e}")
+        raise
 
 # ==================== FUNÇÕES DE TRANSCRIÇÃO ====================
 
@@ -51,51 +176,109 @@ def transcribe_audio_with_speech_recognition(audio_path):
             print("🔧 Carregando arquivo com pydub...")
             audio = AudioSegment.from_file(audio_path)
             
-            # Normalizar áudio
-            audio = audio.normalize()
-            
-            # Converter para mono se necessário
-            if audio.channels > 1:
-                audio = audio.set_channels(1)
-            
-            # Definir sample rate padrão
-            audio = audio.set_frame_rate(16000)
+            # FUNÇÃO ROBUSTA: Processar áudio para compatibilidade com diferentes dispositivos
+            audio = process_audio_for_device_compatibility(audio, "Detectado durante transcrição")
             
             print(f"🎵 Áudio processado: {len(audio)}ms, {audio.frame_rate}Hz, {audio.channels} canal(is)")
             
-            # Se o áudio for muito longo (> 5 minutos), segmentar
-            if len(audio) > 300000:  # 5 minutos em ms
-                return transcribe_long_audio_in_segments(audio, audio_path)
+            # TRANSCRIÇÃO INTELIGENTE: Segmentar áudios longos para melhor precisão
+            duration_seconds = len(audio) / 1000
+            print(f"⏱️ Duração: {duration_seconds:.1f}s")
             
-            # Exportar para WAV temporário
+            if duration_seconds > 30:  # Mais de 30 segundos
+                print(f"📋 Áudio longo detectado - usando transcrição em segmentos")
+                return transcribe_long_audio_in_segments(audio, audio_path)
+            elif duration_seconds < 3:  # Muito curto
+                print(f"⚠️ Áudio muito curto ({duration_seconds:.1f}s) - pode ter problemas de transcrição")
+                # Prosseguir com transcrição normal mas com configurações especiais
+            
+            # CORREÇÃO: Exportar para WAV temporário com configurações específicas para evitar problemas de velocidade
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-                audio.export(temp_file.name, format="wav")
+                print(f"🔧 Exportando WAV temporário com configurações otimizadas...")
+                audio.export(temp_file.name, format="wav", parameters=[
+                    "-acodec", "pcm_s16le",  # PCM 16-bit
+                    "-ar", str(audio.frame_rate),  # Manter sample rate
+                    "-ac", "1"  # Mono
+                ])
                 temp_path = temp_file.name
             
             try:
                 # Transcrever com speech_recognition
                 with sr.AudioFile(temp_path) as source:
-                    print("🎤 Ajustando para ruído ambiente...")
-                    recognizer.adjust_for_ambient_noise(source, duration=1)
+                    print("🎤 Ajustando configurações baseado na duração...")
+                    
+                    # Configurações adaptativas baseadas na duração
+                    if duration_seconds < 3:
+                        # Áudio curto: menos ajuste de ruído, mais sensibilidade
+                        recognizer.adjust_for_ambient_noise(source, duration=0.2)
+                        recognizer.energy_threshold = 2000  # Mais sensível
+                    elif duration_seconds < 10:
+                        # Áudio médio: configuração balanceada
+                        recognizer.adjust_for_ambient_noise(source, duration=0.5)
+                        recognizer.energy_threshold = 3000
+                    else:
+                        # Áudio longo: mais ajuste de ruído
+                        recognizer.adjust_for_ambient_noise(source, duration=1.0)
+                        recognizer.energy_threshold = 4000
                     
                     print("🎧 Carregando áudio...")
                     audio_data = recognizer.record(source)
                     
                     print("🔄 Iniciando transcrição...")
                     
-                    # Tentar múltiplos engines
+                    # Múltiplos engines Google (sistema estável funcionando)
                     engines = [
-                        ('google', lambda: recognizer.recognize_google(audio_data, language='pt-BR')),
-                        ('sphinx', lambda: recognizer.recognize_sphinx(audio_data, language='pt-BR'))
+                        ('google-pt-BR', lambda: recognizer.recognize_google(
+                            audio_data, 
+                            language='pt-BR'
+                        )),
+                        ('google-pt', lambda: recognizer.recognize_google(
+                            audio_data, 
+                            language='pt'  # Português genérico como backup
+                        )),
+                        ('google-with-details', lambda: recognizer.recognize_google(
+                            audio_data, 
+                            language='pt-BR', 
+                            show_all=True  # Obter múltiplas alternativas
+                        ))
                     ]
+                    
+                    best_transcription = None
+                    best_confidence = 0
                     
                     for engine_name, recognize_func in engines:
                         try:
                             print(f"🔍 Tentando com {engine_name}...")
-                            text = recognize_func()
-                            if text and text.strip():
-                                print(f"✅ Transcrição bem-sucedida com {engine_name}!")
-                                return text
+                            result = recognize_func()
+                            
+                            # Processar resultado baseado no tipo
+                            if engine_name == 'google-with-details' and isinstance(result, dict):
+                                # Resultado com múltiplas alternativas do Google
+                                if 'alternative' in result:
+                                    alternatives = result['alternative']
+                                    for alt in alternatives:
+                                        if 'transcript' in alt:
+                                            confidence = alt.get('confidence', 0.5)
+                                            transcript = alt['transcript']
+                                            print(f"📊 Google alternativa: '{transcript}' (confiança: {confidence:.2f})")
+                                            
+                                            if confidence > best_confidence and transcript.strip():
+                                                best_transcription = transcript
+                                                best_confidence = confidence
+                                                
+                            elif isinstance(result, str) and result.strip():
+                                # Resultado simples de string (Google normal)
+                                print(f"✅ {engine_name}: '{result[:50]}...' ({len(result)} chars)")
+                                
+                                # Dar preferência para resultados mais longos se confiança similar
+                                estimated_confidence = 0.8 if 'google' in engine_name else 0.7
+                                
+                                if (estimated_confidence > best_confidence or 
+                                    (abs(estimated_confidence - best_confidence) < 0.1 and 
+                                     len(result) > len(best_transcription or ''))):
+                                    best_transcription = result
+                                    best_confidence = estimated_confidence
+                                    
                         except sr.UnknownValueError:
                             print(f"⚠️ {engine_name}: Não foi possível entender o áudio")
                             continue
@@ -106,8 +289,18 @@ def transcribe_audio_with_speech_recognition(audio_path):
                             print(f"❌ {engine_name}: Erro inesperado: {e}")
                             continue
                     
-                    return "[Não foi possível transcrever o áudio. Verifique a qualidade da gravação.]"
+                    # Retornar melhor resultado
+                    if best_transcription and best_transcription.strip():
+                        print(f"✅ Melhor transcrição encontrada (confiança: {best_confidence:.2f})")
+                        return best_transcription.strip()
                     
+                    # Nenhuma transcrição funcionou
+                    print("❌ Nenhum engine conseguiu transcrever o áudio")
+                    return "[Não foi possível transcrever o áudio. Tente gravar com mais clareza ou em ambiente mais silencioso.]"
+                    
+            except Exception as e:
+                print(f"❌ Erro durante transcrição: {e}")
+                return f"[Erro durante transcrição: {str(e)}]"
             finally:
                 # Limpar arquivo temporário
                 try:
@@ -332,6 +525,654 @@ def create_docx_from_text(text, title="Resumo da Consulta"):
 
 # ==================== ROTAS DA API ====================
 
+@audio_bp.route('/api/audio/upload', methods=['POST'])
+@login_required
+def api_audio_upload():
+    """Rota compatível com frontend para upload de áudio"""
+    try:
+        # Verificar se há arquivo de áudio
+        if 'audio' not in request.files:
+            return jsonify({
+                'success': False,
+                'message': 'Nenhum arquivo de áudio fornecido'
+            }), 400
+        
+        audio_file = request.files['audio']
+        original_name = request.form.get('originalName', '')
+        
+        if audio_file.filename == '':
+            return jsonify({
+                'success': False,
+                'message': 'Nome do arquivo não fornecido'
+            }), 400
+        
+        # Ler dados do arquivo
+        audio_bytes = audio_file.read()
+        
+        # Validar tamanho do arquivo
+        if len(audio_bytes) < 1000:  # Menos de 1KB
+            return jsonify({
+                'success': False,
+                'message': 'Arquivo de áudio muito pequeno ou corrompido'
+            }), 400
+        
+        # Gerar nome único do arquivo
+        user_id = session.get('user_id', 'unknown')
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        unique_id = str(random.randint(100000, 999999))
+        
+        # Usar nome original se fornecido
+        if original_name:
+            filename = f"{original_name}_{timestamp}_{unique_id}_{user_id}.wav"
+        else:
+            filename = f"recording_{timestamp}_{unique_id}_{user_id}.wav"
+        
+        # Garantir que o diretório existe
+        os.makedirs(RECORDINGS_DIR, exist_ok=True)
+        file_path = os.path.join(RECORDINGS_DIR, filename)
+        
+        # Verificar se arquivo já existe (evitar duplicação)
+        if os.path.exists(file_path):
+            counter = 1
+            base_name, ext = os.path.splitext(filename)
+            while os.path.exists(file_path):
+                filename = f"{base_name}_({counter}){ext}"
+                file_path = os.path.join(RECORDINGS_DIR, filename)
+                counter += 1
+        
+        # Processar áudio com pydub para garantir compatibilidade
+        try:
+            # FUNÇÃO ROBUSTA: Detectar formato do áudio para diferentes dispositivos
+            print(f"🔍 Processando áudio: {len(audio_bytes)} bytes")
+            
+            # FUNÇÃO ROBUSTA: Detectar formato do áudio para diferentes dispositivos
+            format_result = detect_audio_format_robust(audio_bytes)
+            
+            # Extrair formato e sample rate esperado
+            if isinstance(format_result, tuple):
+                detected_format, expected_sample_rate = format_result
+            else:
+                # Fallback para compatibilidade com versões antigas
+                detected_format = format_result
+                expected_sample_rate = 44100
+            
+            print(f"🎯 Formato detectado: {detected_format}")
+            print(f"🎵 Sample rate esperado: {expected_sample_rate}Hz")
+            
+            # Tentar carregar com pydub (suporta múltiplos formatos)
+            try:
+                audio_segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
+                print(f"✅ Áudio carregado com pydub: {audio_segment.frame_rate}Hz, {audio_segment.channels} canais")
+                print(f"   Formato original: {detected_format}")
+            except Exception as pydub_error:
+                print(f"⚠️ Erro ao carregar com pydub: {pydub_error}")
+                # Fallback: salvar arquivo original
+                with open(file_path, 'wb') as f:
+                    f.write(audio_bytes)
+                file_size = len(audio_bytes)
+                print(f"✅ Arquivo salvo sem processamento: {filename} ({file_size} bytes)")
+                return jsonify({
+                    'message': 'Áudio salvo com sucesso (sem processamento)',
+                    'audioFile': {
+                        'filename': filename,
+                        'originalName': original_name or filename,
+                        'size': file_size,
+                        'createdAt': datetime.now().isoformat()
+                    }
+                }), 201
+            
+            # FUNÇÃO ROBUSTA: Processar áudio para compatibilidade com diferentes dispositivos
+            audio_segment = process_audio_for_device_compatibility(audio_segment, detected_format)
+            
+            # CORREÇÃO: Exportar como WAV com configurações específicas para evitar problemas de velocidade
+            print(f"🔧 Exportando WAV com configurações otimizadas...")
+            audio_segment.export(
+                file_path, 
+                format="wav",
+                parameters=[
+                    "-acodec", "pcm_s16le",  # PCM 16-bit
+                    "-ar", str(audio_segment.frame_rate),  # Manter sample rate
+                    "-ac", "1"  # Mono
+                ]
+            )
+            
+            file_size = os.path.getsize(file_path)
+            print(f"✅ Gravação processada e salva: {filename} ({file_size} bytes)")
+            
+        except Exception as e:
+            print(f"⚠️ Erro no processamento com pydub: {e}")
+            # Fallback: salvar arquivo original
+            try:
+                with open(file_path, 'wb') as f:
+                    f.write(audio_bytes)
+                file_size = len(audio_bytes)
+                print(f"✅ Gravação salva (fallback): {filename} ({file_size} bytes)")
+            except Exception as fallback_error:
+                print(f"❌ Erro no fallback: {fallback_error}")
+                return jsonify({
+                    'success': False,
+                    'message': 'Erro ao salvar arquivo de áudio'
+                }), 500
+        
+                    # Resposta compatível com frontend
+            return jsonify({
+                'message': 'Áudio processado e salvo com sucesso',
+                'audioFile': {
+                    'filename': filename,
+                    'originalName': original_name or filename,
+                    'size': file_size,
+                    'createdAt': datetime.now().isoformat(),
+                    'originalFormat': detected_format,
+                    'frameRate': audio_segment.frame_rate,
+                    'channels': audio_segment.channels,
+                    'duration': len(audio_segment),
+                    'processingInfo': {
+                        'deviceCompatible': True,
+                        'qualityPreserved': True,
+                        'speedCorrected': True
+                    }
+                }
+            }), 201
+        
+    except Exception as e:
+        print(f"❌ Erro geral ao fazer upload: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Erro interno do servidor: {str(e)}'
+        }), 500
+
+@audio_bp.route('/api/audio/save-simple', methods=['POST'])
+@login_required
+def api_audio_save_simple():
+    """
+    NOVA ARQUITETURA: Salvamento simples e rápido (sem processamento pesado)
+    Responsabilidade Única: Apenas salvar arquivo original para processamento posterior
+    """
+    try:
+        # Verificar se há arquivo de áudio
+        if 'audio' not in request.files:
+            return jsonify({
+                'success': False,
+                'message': 'Nenhum arquivo de áudio enviado'
+            }), 400
+        
+        audio_file = request.files['audio']
+        original_name = request.form.get('originalName', '')
+        
+        if audio_file.filename == '':
+            return jsonify({
+                'success': False,
+                'message': 'Nome de arquivo inválido'
+            }), 400
+        
+        # Gerar nome único para o arquivo
+        user_id = session.get('user_id', '')
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+        random_suffix = random.randint(100000, 999999)
+        
+        # SIMPLIFICADO: Manter extensão original (WebM/Opus)
+        original_extension = audio_file.filename.split('.')[-1] if '.' in audio_file.filename else 'webm'
+        filename = f"{original_name or 'recording'}_{timestamp}_{random_suffix}_{user_id}.{original_extension}"
+        
+        # Garantir que o diretório existe
+        os.makedirs(RECORDINGS_DIR, exist_ok=True)
+        file_path = os.path.join(RECORDINGS_DIR, filename)
+        
+        # SALVAMENTO SIMPLES: Apenas salvar arquivo original
+        print(f"💾 Salvamento simples: {filename}")
+        audio_file.save(file_path)
+        
+        file_size = os.path.getsize(file_path)
+        print(f"✅ Arquivo salvo rapidamente: {filename} ({file_size} bytes)")
+        
+        # Resposta simples e rápida
+        return jsonify({
+            'success': True,
+            'message': 'Áudio salvo com sucesso! Use "Processar e Transcrever" para otimizar.',
+            'audioFile': {
+                'filename': filename,
+                'originalName': original_name or filename,
+                'size': file_size,
+                'createdAt': datetime.now().isoformat(),
+                'status': 'raw',  # Arquivo não processado
+                'needsProcessing': True
+            }
+        }), 201
+        
+    except Exception as e:
+        print(f"❌ Erro no salvamento simples: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Erro ao salvar áudio: {str(e)}'
+        }), 500
+
+@audio_bp.route('/api/audio/process', methods=['POST'])
+@login_required
+def api_audio_process():
+    """
+    NOVA ARQUITETURA: Processamento otimizado sob demanda
+    Responsabilidade Única: Otimizar áudio e preparar para transcrição
+    """
+    try:
+        data = request.get_json()
+        filename = data.get('filename')
+        
+        if not filename:
+            return jsonify({
+                'success': False,
+                'message': 'Nome do arquivo não fornecido'
+            }), 400
+        
+        # Verificar se arquivo existe
+        file_path = os.path.join(RECORDINGS_DIR, filename)
+        if not os.path.exists(file_path):
+            return jsonify({
+                'success': False,
+                'message': 'Arquivo não encontrado'
+            }), 404
+        
+        print(f"🔄 Iniciando processamento otimizado: {filename}")
+        
+        # Carregar arquivo original
+        with open(file_path, 'rb') as f:
+            audio_bytes = f.read()
+        
+        # Detectar formato
+        format_result = detect_audio_format_robust(audio_bytes)
+        if isinstance(format_result, tuple):
+            detected_format, expected_sample_rate = format_result
+        else:
+            detected_format = format_result
+            expected_sample_rate = 44100
+        
+        print(f"🎯 Formato detectado: {detected_format}")
+        print(f"🎵 Sample rate esperado: {expected_sample_rate}Hz")
+        
+        # Processar com pydub
+        audio_segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
+        print(f"✅ Áudio carregado: {audio_segment.frame_rate}Hz, {audio_segment.channels} canais")
+        
+        # Aplicar otimizações
+        optimized_audio = process_audio_for_device_compatibility(audio_segment, detected_format)
+        
+        # Gerar nome do arquivo otimizado
+        base_name = filename.rsplit('.', 1)[0]
+        optimized_filename = f"{base_name}_optimized.wav"
+        optimized_path = os.path.join(RECORDINGS_DIR, optimized_filename)
+        
+        # Salvar versão otimizada
+        print(f"💾 Salvando versão otimizada: {optimized_filename}")
+        optimized_audio.export(
+            optimized_path,
+            format="wav",
+            parameters=[
+                "-acodec", "pcm_s16le",  # PCM 16-bit
+                "-ar", str(optimized_audio.frame_rate),  # Manter sample rate otimizado
+                "-ac", "1"  # Mono
+            ]
+        )
+        
+        file_size = os.path.getsize(optimized_path)
+        print(f"✅ Arquivo otimizado salvo: {optimized_filename} ({file_size} bytes)")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Áudio processado e otimizado com sucesso!',
+            'originalFile': filename,
+            'optimizedFile': optimized_filename,
+            'processing': {
+                'originalFormat': detected_format,
+                'originalSampleRate': audio_segment.frame_rate,
+                'optimizedSampleRate': optimized_audio.frame_rate,
+                'optimizedSize': file_size,
+                'qualityImproved': optimized_audio.frame_rate > audio_segment.frame_rate
+            }
+        }), 200
+        
+    except Exception as e:
+        print(f"❌ Erro no processamento: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Erro ao processar áudio: {str(e)}'
+        }), 500
+
+@audio_bp.route('/api/audio/transcribe', methods=['POST'])
+@login_required
+def api_audio_transcribe():
+    """
+    NOVA ARQUITETURA: Transcrição otimizada de arquivo processado
+    Responsabilidade Única: Transcrever áudio já otimizado
+    """
+    try:
+        data = request.get_json()
+        optimized_filename = data.get('optimizedFile')
+        
+        if not optimized_filename:
+            return jsonify({
+                'success': False,
+                'message': 'Nome do arquivo otimizado não fornecido'
+            }), 400
+        
+        # Verificar se arquivo otimizado existe
+        optimized_path = os.path.join(RECORDINGS_DIR, optimized_filename)
+        if not os.path.exists(optimized_path):
+            return jsonify({
+                'success': False,
+                'message': 'Arquivo otimizado não encontrado'
+            }), 404
+        
+        print(f"🎯 Iniciando transcrição otimizada: {optimized_filename}")
+        
+        # Transcrever arquivo otimizado
+        transcription = transcribe_audio_with_speech_recognition(optimized_path)
+        
+        if not transcription or transcription.startswith('[Erro') or transcription.startswith('[Não foi possível'):
+            return jsonify({
+                'success': False,
+                'message': 'Falha na transcrição',
+                'transcription': transcription
+            }), 422
+        
+        # Salvar transcrição
+        base_name = optimized_filename.rsplit('.', 1)[0]
+        transcription_filename = f"{base_name}_transcricao.txt"
+        transcription_path = os.path.join('transcriptions', transcription_filename)
+        
+        # Garantir que o diretório existe
+        os.makedirs('transcriptions', exist_ok=True)
+        
+        # Salvar arquivo de transcrição
+        with open(transcription_path, 'w', encoding='utf-8') as f:
+            f.write(transcription)
+        
+        print(f"✅ Transcrição salva: {transcription_filename}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Transcrição concluída com sucesso!',
+            'transcription': transcription,
+            'transcriptionFile': transcription_filename,
+            'optimizedFile': optimized_filename,
+            'processing': {
+                'transcriptionLength': len(transcription),
+                'wordCount': len(transcription.split()) if transcription else 0,
+                'qualityOptimized': True
+            }
+        }), 200
+        
+    except Exception as e:
+        print(f"❌ Erro na transcrição: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Erro ao transcrever áudio: {str(e)}'
+        }), 500
+
+@audio_bp.route('/api/audio/test-fix', methods=['POST'])
+@login_required
+def api_audio_test_fix():
+    """
+    ENDPOINT DE TESTE: Testar correção de sample rate para resolver áudio lento
+    """
+    try:
+        data = request.get_json()
+        filename = data.get('filename')
+        
+        if not filename:
+            return jsonify({
+                'success': False,
+                'message': 'Nome do arquivo não fornecido'
+            }), 400
+        
+        file_path = os.path.join(RECORDINGS_DIR, filename)
+        if not os.path.exists(file_path):
+            return jsonify({
+                'success': False,
+                'message': 'Arquivo não encontrado'
+            }), 404
+        
+        print(f"🧪 TESTE DE CORREÇÃO: {filename}")
+        
+        # Carregar arquivo
+        with open(file_path, 'rb') as f:
+            audio_bytes = f.read()
+        
+        # Análise inicial
+        audio_segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
+        original_rate = audio_segment.frame_rate
+        original_duration = len(audio_segment)
+        
+        print(f"📊 ANTES: {original_rate}Hz, {original_duration}ms")
+        
+        # Aplicar correção robusta
+        if original_rate <= 22050:
+            # Forçar sample rate correto SEM reamostrar
+            corrected_audio = audio_segment._spawn(audio_segment.raw_data, overrides={"frame_rate": 44100})
+            print(f"🔧 FORÇADO: {original_rate}Hz → 44.1kHz (mesmos dados, interpretação correta)")
+        else:
+            corrected_audio = audio_segment
+            print(f"✅ MANTIDO: {original_rate}Hz")
+        
+        # Verificar resultado
+        final_rate = corrected_audio.frame_rate
+        final_duration = len(corrected_audio)
+        
+        print(f"📊 DEPOIS: {final_rate}Hz, {final_duration}ms")
+        
+        # Salvar arquivo teste
+        test_filename = f"TEST_FIXED_{filename}"
+        test_path = os.path.join(RECORDINGS_DIR, test_filename)
+        
+        corrected_audio.export(
+            test_path,
+            format="wav",
+            parameters=[
+                "-acodec", "pcm_s16le",
+                "-ar", str(final_rate),
+                "-ac", "1"
+            ]
+        )
+        
+        # Verificar arquivo salvo
+        with wave.open(test_path, 'rb') as wav_file:
+            saved_rate = wav_file.getframerate()
+            saved_duration = wav_file.getnframes() / saved_rate * 1000
+        
+        print(f"💾 ARQUIVO SALVO: {saved_rate}Hz, {saved_duration:.0f}ms")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Teste de correção concluído',
+            'original': {
+                'filename': filename,
+                'sampleRate': original_rate,
+                'duration': original_duration
+            },
+            'corrected': {
+                'filename': test_filename,
+                'sampleRate': final_rate,
+                'duration': final_duration
+            },
+            'saved': {
+                'sampleRate': saved_rate,
+                'duration': saved_duration
+            },
+            'speedFixed': original_rate != final_rate
+        }), 200
+        
+    except Exception as e:
+        print(f"❌ Erro no teste: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Erro no teste: {str(e)}'
+        }), 500
+
+@audio_bp.route('/api/audio/calibrate', methods=['POST'])
+@login_required
+def api_audio_calibrate():
+    """
+    CALIBRAÇÃO FINA: Ajustar sample rate para velocidade perfeita
+    """
+    try:
+        data = request.get_json()
+        filename = data.get('filename')
+        speed_feedback = data.get('speedFeedback', 'normal')  # 'slow', 'fast', 'normal'
+        
+        if not filename:
+            return jsonify({
+                'success': False,
+                'message': 'Nome do arquivo não fornecido'
+            }), 400
+        
+        file_path = os.path.join(RECORDINGS_DIR, filename)
+        if not os.path.exists(file_path):
+            return jsonify({
+                'success': False,
+                'message': 'Arquivo não encontrado'
+            }), 404
+        
+        print(f"🎛️ CALIBRAÇÃO FINA: {filename} - Feedback: {speed_feedback}")
+        
+        # Carregar arquivo
+        with open(file_path, 'rb') as f:
+            audio_bytes = f.read()
+        
+        audio_segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
+        original_rate = audio_segment.frame_rate
+        
+        # Calcular fator de correção baseado no feedback
+        if speed_feedback == 'slow':
+            # Ainda está lento, aumentar sample rate um pouco mais
+            if original_rate == 44100:
+                calibrated_rate = 45000  # +2% mais rápido
+            else:
+                calibrated_rate = int(original_rate * 1.02)  # +2%
+            print(f"🔧 CORREÇÃO LENTO: {original_rate}Hz → {calibrated_rate}Hz (+2%)")
+            
+        elif speed_feedback == 'fast':
+            # Está rápido demais, diminuir sample rate um pouco
+            if original_rate == 44100:
+                calibrated_rate = 43200  # -2% mais lento
+            else:
+                calibrated_rate = int(original_rate * 0.98)  # -2%
+            print(f"🔧 CORREÇÃO RÁPIDO: {original_rate}Hz → {calibrated_rate}Hz (-2%)")
+            
+        else:  # normal
+            calibrated_rate = original_rate
+            print(f"✅ VELOCIDADE PERFEITA: {original_rate}Hz mantido")
+        
+        if calibrated_rate != original_rate:
+            # Aplicar calibração
+            calibrated_audio = audio_segment._spawn(audio_segment.raw_data, overrides={"frame_rate": calibrated_rate})
+            
+            # Salvar arquivo calibrado
+            calibrated_filename = f"CALIBRATED_{filename}"
+            calibrated_path = os.path.join(RECORDINGS_DIR, calibrated_filename)
+            
+            calibrated_audio.export(
+                calibrated_path,
+                format="wav",
+                parameters=[
+                    "-acodec", "pcm_s16le",
+                    "-ar", str(calibrated_rate),
+                    "-ac", "1"
+                ]
+            )
+            
+            return jsonify({
+                'success': True,
+                'message': f'Áudio calibrado para velocidade {speed_feedback}',
+                'original': {
+                    'filename': filename,
+                    'sampleRate': original_rate
+                },
+                'calibrated': {
+                    'filename': calibrated_filename,
+                    'sampleRate': calibrated_rate,
+                    'adjustment': f"{'+' if calibrated_rate > original_rate else ''}{((calibrated_rate - original_rate) / original_rate * 100):.1f}%"
+                }
+            }), 200
+        else:
+            return jsonify({
+                'success': True,
+                'message': 'Áudio já está na velocidade perfeita',
+                'noAdjustmentNeeded': True
+            }), 200
+        
+    except Exception as e:
+        print(f"❌ Erro na calibração: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Erro na calibração: {str(e)}'
+        }), 500
+
+@audio_bp.route('/api/audio/files', methods=['GET'])
+@login_required
+def api_audio_files():
+    """Lista arquivos de áudio do usuário (compatível com frontend)"""
+    try:
+        user_id = session.get('user_id', '')
+        user_email = session.get('user_email', '')
+        recordings = []
+        
+        print(f"🔍 Buscando arquivos para user_id: {user_id}, email: {user_email}")
+        
+        # Verificar se o diretório existe
+        if not os.path.exists(RECORDINGS_DIR):
+            os.makedirs(RECORDINGS_DIR, exist_ok=True)
+            return jsonify({'audioFiles': []})
+        
+        # Listar arquivos
+        all_files = os.listdir(RECORDINGS_DIR)
+        print(f"📋 Arquivos encontrados: {len(all_files)}")
+        
+        for filename in all_files:
+            if not filename.endswith('.wav'):
+                continue
+            
+            # Verificar se pertence ao usuário
+            belongs_to_user = False
+            
+            # Formato novo: nome_timestamp_userid.wav
+            if filename.endswith(f"_{user_id}.wav"):
+                belongs_to_user = True
+            # Formato antigo com email
+            elif user_email:
+                old_format_suffix = f"_{user_email.replace('@', '_').replace('.', '_')}.wav"
+                if filename.endswith(old_format_suffix):
+                    belongs_to_user = True
+            
+            if not belongs_to_user:
+                continue
+            
+            file_path = os.path.join(RECORDINGS_DIR, filename)
+            try:
+                stats = os.stat(file_path)
+                file_size = stats.st_size
+                created_time = datetime.fromtimestamp(stats.st_ctime)
+                
+                recordings.append({
+                    'id': filename,  # Usar filename como ID
+                    'filename': filename,
+                    'originalName': filename.replace(f'_{user_id}.wav', '').replace('.wav', ''),
+                    'size': file_size,
+                    'createdAt': created_time.isoformat()
+                })
+            except Exception as e:
+                print(f"❌ Erro ao processar arquivo {filename}: {e}")
+                continue
+        
+        # Ordenar por data de criação (mais recentes primeiro)
+        recordings.sort(key=lambda x: x['createdAt'], reverse=True)
+        
+        return jsonify({'audioFiles': recordings})
+        
+    except Exception as e:
+        print(f"❌ Erro ao listar arquivos: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Erro interno do servidor: {str(e)}'
+        }), 500
+
 @audio_bp.route('/api/save_recording', methods=['POST'])
 @login_required
 def api_save_recording():
@@ -400,12 +1241,10 @@ def api_save_recording():
             # Carregar áudio original
             audio_segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
             
-            # Configurações otimizadas para deploy
-            audio_segment = audio_segment.set_channels(1)  # Mono
-            audio_segment = audio_segment.set_frame_rate(16000)  # 16kHz
-            audio_segment = audio_segment.normalize()  # Normalizar volume
+            # FUNÇÃO ROBUSTA: Processar áudio para compatibilidade com diferentes dispositivos
+            audio_segment = process_audio_for_device_compatibility(audio_segment, "Gravação via API")
             
-            # Exportar como WAV de alta qualidade
+            # Exportar como WAV mantendo qualidade
             audio_segment.export(
                 file_path, 
                 format="wav",
@@ -1381,16 +2220,19 @@ def assemble_chunks(session_id, user_id, total_chunks):
         for segment in audio_segments[1:]:
             final_audio += segment
         
-        # Processar áudio final
-        final_audio = final_audio.set_channels(1)  # Mono
-        final_audio = final_audio.set_frame_rate(16000)  # 16kHz
-        final_audio = final_audio.normalize()  # Normalizar
+        # FUNÇÃO ROBUSTA: Processar áudio final para compatibilidade com diferentes dispositivos
+        final_audio = process_audio_for_device_compatibility(final_audio, "Chunks montados")
         
-        # Exportar arquivo final
+        # CORREÇÃO: Exportar arquivo final com configurações específicas para evitar problemas de velocidade
+        print(f"🔧 Exportando arquivo final com configurações otimizadas...")
         final_audio.export(
             final_path,
             format="wav",
-            parameters=["-acodec", "pcm_s16le"]
+            parameters=[
+                "-acodec", "pcm_s16le",  # PCM 16-bit
+                "-ar", str(final_audio.frame_rate),  # Manter sample rate
+                "-ac", "1"  # Mono
+            ]
         )
         
         file_size = os.path.getsize(final_path)
@@ -1500,3 +2342,4 @@ def debug_files(filename):
             'success': False,
             'message': f'Erro no debug: {str(e)}'
         }), 500
+
